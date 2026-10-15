@@ -2,6 +2,7 @@ import torch
 from diffusers import StableDiffusionXLPipeline
 import sys
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Загружаем переменные из .env
@@ -38,11 +39,20 @@ def generate_image(prompt: str, negative_prompt: str, num_images: int = 1, outpu
         )
         pipe.to("cuda")
 
+        # Генерируем временную метку один раз для всей пачки
+        timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
+
         for i in range(num_images):
+            counter = i + 1
             if num_images > 1:
-                current_output_path = os.path.join(output_dir, f"generated_image_{i+1}.png")
+                filename = f"{timestamp}_{counter}.png"
+                current_output_path = os.path.join(output_dir, filename)
             else:
-                current_output_path = output_path if output_path else os.path.join(output_dir, "generated_image.png")
+                # Если просили одну картинку и передали конкретный путь - используем его
+                # Иначе используем timestamp для единообразия или старый формат? 
+                # Пользователь сказал "префикс у файлов должен быть...", значит лучше всегда использовать timestamp.
+                filename = f"{timestamp}_{counter}.png"
+                current_output_path = output_path if output_path else os.path.join(output_dir, filename)
 
             print(f"\nGenerating image {i+1}/{num_images}... (RTX 4080 power activated!)")
             
