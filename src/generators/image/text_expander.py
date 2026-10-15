@@ -4,9 +4,6 @@ import json
 from dotenv import load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Загружаем переменные из .env
-load_dotenv()
-
 def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
     """
     Uses a lightweight LLM to expand user natural language into Danbooru-style tags.
@@ -23,7 +20,7 @@ def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
             device_map="cuda"
         )
 
-        refinement_guidelines = os.getenv("EXTRA_REFINEMENT_RULES", "")
+        refinement_guidelines = os.getenv("IMAGE_EXTRA_REFINEMENT_RULES", "")
         system_prompt = f"""You are a specialized assistant that converts natural language descriptions (English or Russian) into structured Danbooru-style tags for image generation using Pony Diffusion V6 XL.
 
 Your output must be a valid JSON object with exactly two keys: 'positive' and 'negative'. Do not include any markdown wrapper or explanation.
@@ -65,12 +62,10 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
         ]
         response = tokenizer.batch_decode(response_ids, skip_special_tokens=True)[0].strip()
 
-        # Clean up VRAM immediately before returning
         del model
         del tokenizer
         torch.cuda.empty_cache()
 
-        # Parse JSON response
         if "```json" in response:
             response = response.split("```json")[1].split("```")[0].strip()
         elif "```" in response:
@@ -81,10 +76,9 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
 
     except Exception as e:
         print(f"--- [Text Phase] Error or parsing failure: {e} ---")
-        # Fallback to basic prompt if LLM fails
         fallback_pos = f"score_9, score_8_up, score_7_up, {user_input}"
         fallback_neg = "score_4, score_5, score_6, low quality, bad anatomy"
-        # Ensure cleanup even on error if model was loaded
+
         if 'model' in locals(): del model
         if 'tokenizer' in locals(): del tokenizer
         torch.cuda.empty_cache()

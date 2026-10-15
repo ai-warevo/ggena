@@ -17,14 +17,11 @@ def main():
     args = parser.parse_args()
 
     if args.module == "image":
-        # If a prompt is provided, we use the LLM expansion phase first
-        if args.prompt:
-            print(f"--- [Orchestrator] Expanding user prompt via LLM ---")
-            pos_prompt, neg_prompt = translate_user_intent_to_tags(args.prompt)
-        else:
-            # Fallback to default from .env if no prompt provided
-            pos_prompt = os.getenv("DEFAULT_PROMPT", "")
-            neg_prompt = ""
+        if not args.prompt:
+            raise "?"
+
+        print(f"--- [Orchestrator] Expanding user prompt via LLM ---")
+        pos_prompt, neg_prompt = translate_user_intent_to_tags(args.prompt)
 
         generate_image(pos_prompt, neg_prompt, num_images=args.num_images)
     elif args.module in ["audio", "music", "video"]:
