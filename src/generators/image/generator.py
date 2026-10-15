@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # Загружаем переменные из .env
 load_dotenv()
 
-def generate_image(prompt: str, negative_prompt: str, output_path=None):
+def generate_image(prompt: str, negative_prompt: str, num_images: int = 1, output_path=None):
     if not prompt:
         prompt = ""
     if "score_9" not in prompt and prompt != "":
@@ -17,15 +17,13 @@ def generate_image(prompt: str, negative_prompt: str, output_path=None):
         negative_prompt = ""
 
     # Настройка пути сохранения
-    if output_path is None:
-        output_dir = os.getenv("OUTPUT_DIR", ".")
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, "generated_image.png")
+    output_dir = os.getenv("OUTPUT_DIR", ".")
+    os.makedirs(output_dir, exist_ok=True)
 
     print(f"--- Starting Image Generation (SDXL / Pony V6) ---")
     print(f"Prompt: {prompt}")
     print(f"Negative Prompt: {negative_prompt}")
-    print(f"Target Path: {output_path}")
+    print(f"Number of images: {num_images}")
     
     try:
         model_id = os.getenv("MODEL_ID", "stabilityai/sdxl-turbo")
@@ -40,18 +38,25 @@ def generate_image(prompt: str, negative_prompt: str, output_path=None):
         )
         pipe.to("cuda")
 
-        print("Generating... (RTX 4080 power activated!)")
-        
-        image = pipe(
-            prompt=prompt, 
-            negative_prompt=negative_prompt,
-            guidance_scale=7.0, 
-            num_inference_steps=30
-        ).images[0]
+        for i in range(num_images):
+            if num_images > 1:
+                current_output_path = os.path.join(output_dir, f"generated_image_{i+1}.png")
+            else:
+                current_output_path = output_path if output_path else os.path.join(output_dir, "generated_image.png")
 
-        print(f"Saving image to: {output_path}")
-        image.save(output_path)
-        print("--- Success! ---")
+            print(f"\nGenerating image {i+1}/{num_images}... (RTX 4080 power activated!)")
+            
+            image = pipe(
+                prompt=prompt, 
+                negative_prompt=negative_prompt,
+                guidance_scale=7.0, 
+                num_inference_steps=30
+            ).images[0]
+
+            print(f"Saving image to: {current_output_path}")
+            image.save(current_output_path)
+        
+        print("\n--- All images generated successfully! ---")
         
     except Exception as e:
         print(f"--- Error ---")
@@ -61,4 +66,5 @@ def generate_image(prompt: str, negative_prompt: str, output_path=None):
 if __name__ == "__main__":
     user_prompt = sys.argv[1] if len(sys.argv) > 1 else None
     negative_prompt = sys.argv[2] if len(sys.argv) > 2 else None
-    generate_image(user_prompt, negative_prompt)
+    num_images = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+    generate_image(user_prompt, negative_prompt, num_images)

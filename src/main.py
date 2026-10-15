@@ -13,6 +13,7 @@ def main():
     parser.add_argument("module", choices=["audio", "music", "image", "video"], help="Module to run")
     parser.add_argument("prompt", nargs="?", help="Prompt for the generator")
     parser.add_argument("--negative-prompt", dest="negative_prompt", help="Negative prompt for the generator")
+    parser.add_argument("--num-images", type=int, default=int(os.getenv("NUM_IMAGES", 1)), help="Number of images to generate")
 
     args = parser.parse_args()
 
@@ -20,7 +21,7 @@ def main():
         # Fallback для prompt и negative_prompt
         prompt = args.prompt if args.prompt else os.getenv("DEFAULT_PROMPT", "")
         neg_prompt = args.negative_prompt if args.negative_prompt else os.getenv("DEFAULT_NEGATIVE_PROMPT", "")
-        generate_image(prompt, neg_prompt)
+        generate_image(prompt, neg_prompt, num_images=args.num_images)
     elif args.module in ["audio", "music", "video"]:
         print(f"Module '{args.module}' is not implemented yet.")
         sys.exit(0)
