@@ -5,7 +5,6 @@ export
 
 # Default values from .env if not provided via command line
 PROMPT ?= $(DEFAULT_PROMPT)
-NEGATIVE_PROMPT ?= $(DEFAULT_NEGATIVE_PROMPT)
 
 .PHONY: dcu dcexec gen stop logs
 
@@ -17,9 +16,10 @@ dcu:
 dcexec:
 	docker compose exec ai-app bash
 
-# Generate image (Usage: make gen PROMPT="your prompt" NEGATIVE_PROMPT="your neg prompt")
+# Generate image (Usage: make gen PROMPT="your prompt")
+# Note: The orchestrator now uses an LLM to expand your prompt into Danbooru tags!
 gen:
-	docker compose exec ai-app python3 -m src.main image $(PROMPT) --negative-prompt $(NEGATIVE_PROMPT)
+	docker compose exec ai-app python3 -m src.main image $(PROMPT)
 
 # Stop containers
 stop:

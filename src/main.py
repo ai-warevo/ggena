@@ -3,25 +3,30 @@ import sys
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env
 load_dotenv()
 
-from src.generators.image.generator import generate_image
+from src.generators.image import generate_image, translate_user_intent_to_tags
 
 def main():
     parser = argparse.ArgumentParser(description="AI Generator Orchestrator")
     parser.add_argument("module", choices=["audio", "music", "image", "video"], help="Module to run")
     parser.add_argument("prompt", nargs="?", help="Prompt for the generator")
-    parser.add_argument("--negative-prompt", dest="negative_prompt", help="Negative prompt for the generator")
-    parser.add_argument("--num-images", type=int, default=int(os.getenv("NUM_IMAGES", 1)), help="Number of images to generate")
+    parser.add_argument("--num-images", type=int, default=int(os.getenv("IMAGE_GEN_COUNT", 1)), help="Number of images to generate")
+
 
     args = parser.parse_args()
 
     if args.module == "image":
-        # Fallback для prompt и negative_prompt
-        prompt = args.prompt if args.prompt else os.getenv("DEFAULT_PROMPT", "")
-        neg_prompt = args.negative_prompt if args.negative_prompt else os.getenv("DEFAULT_NEGATIVE_PROMPT", "")
-        generate_image(prompt, neg_prompt, num_images=args.num_images)
+        # If a prompt is provided, we use the LLM expansion phase first
+        if args.prompt:
+            print(f"--- [Orchestrator] Expanding user prompt via LLM ---")
+            pos_prompt, neg_prompt = translate_user_intent_to_tags(args.prompt)
+        else:
+            # Fallback to default from .env if no prompt provided
+            pos_prompt = os.getenv("DEFAULT_PROMPT", "")
+            neg_prompt = ""
+
+        generate_image(pos_prompt, neg_prompt, num_images=args.num_images)
     elif args.module in ["audio", "music", "video"]:
         print(f"Module '{args.module}' is not implemented yet.")
         sys.exit(0)
