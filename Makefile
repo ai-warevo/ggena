@@ -1,7 +1,11 @@
 # Docker Compose commands
 
-# Default prompt if none is provided via command line
-PROMPT ?= "A cinematic shot of a futuristic cyberpunk city, neon lights, rainy streets, highly detailed, 8k"
+include .env
+export
+
+# Default values from .env if not provided via command line
+PROMPT ?= $(DEFAULT_PROMPT)
+NEGATIVE_PROMPT ?= $(DEFAULT_NEGATIVE_PROMPT)
 
 .PHONY: dcu dcexec gen stop logs
 
@@ -13,9 +17,9 @@ dcu:
 dcexec:
 	docker compose exec ai-app bash
 
-# Generate image with a prompt (Usage: make gen PROMPT="your prompt")
+# Generate image (Usage: make gen PROMPT="your prompt" NEGATIVE_PROMPT="your neg prompt")
 gen:
-	docker compose exec ai-app python3 -m src.main image "$(PROMPT)"
+	docker compose exec ai-app python3 -m src.main image $(PROMPT) --negative-prompt $(NEGATIVE_PROMPT)
 
 # Stop containers
 stop:
