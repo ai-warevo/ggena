@@ -25,7 +25,7 @@ The project is transitioning from a single script to a modular package structure
     - Evaluate the current `try-except` blocks and `print` statements. Suggest a professional logging strategy (`logging` module) that provides different levels (INFO, DEBUG, ERROR) and structured output.
 
 ## Expected Output
-A maintainability report including:
+Created files inside docs/reports/ with a maintainability report including:
 - A list of "code smells" found in the current implementation.
 - A set of coding standards/rules for this project.
 - A proposed testing plan (Unit, Integration, End-to-End).

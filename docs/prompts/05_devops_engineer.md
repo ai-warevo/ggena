@@ -29,7 +29,7 @@ The project uses Docker and Docker Compose for local development and is intended
     - Suggest a strategy for logging and monitoring the health of the generation services (e.g., structured logs, Prometheus metrics).
 
 ## Expected Output
-A DevOps roadmap including:
+Created files inside docs/reports/ with a DevOps roadmap including:
 - A proposed GitHub Actions workflow definition (YAML).
 - An optimized multi-stage `Dockerfile`.
 - An expanded `Makefile` with standard automation commands.

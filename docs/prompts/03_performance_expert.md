@@ -25,7 +25,7 @@ The project performs heavy deep learning tasks using `torch` and `diffusers`. It
     - Optimize the flow from prompt input -> model inference -> post-processing -> file saving.
 
 ## Expected Output
-A performance optimization roadmap including:
+Created files inside docs/reports/ with a performance optimization roadmap including:
 - A breakdown of current bottlenecks (theoretical).
 - Specific code-level optimizations for `torch` and `diffusers`.
 - Recommendations for hardware-specific tuning (NVIDIA/CUDA).

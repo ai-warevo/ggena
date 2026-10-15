@@ -20,7 +20,7 @@ The project handles sensitive information like API tokens (`HF_TOKEN`) via `.env
 5. **Data Integrity**: Ensure that output directories and cache paths are handled securely to prevent unauthorized file access or overwriting.
 
 ## Expected Output
-A security assessment report containing:
+Created files inside docs/reports/ with a security assessment report containing:
 - A list of identified vulnerabilities (High/Medium/Low).
 - Hardening recommendations for the `Dockerfile` and `docker-compose.yml`.
 - A proposed "Security Checklist" for future development.
