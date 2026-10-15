@@ -1,0 +1,22 @@
+services:
+  ai-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ggena-ai
+    container_name: ggena_container
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/workspace
+      - ./hf_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
