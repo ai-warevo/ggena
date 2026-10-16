@@ -3,6 +3,7 @@ from diffusers import StableDiffusionXLPipeline
 import io
 from datetime import datetime
 from typing import List, Optional
+import asyncio
 
 from src.generators.base import BaseGenerator
 from src.core.types import GenerationRequest, GenerationResponse
@@ -86,7 +87,7 @@ class ImageGenerator(BaseGenerator):
             )
             self._pipe.to("cuda")
 
-    def generate(self, request: GenerationRequest) -> GenerationResponse:
+    async def generate(self, request: GenerationRequest) -> GenerationResponse:
         """
         Generates images based on the provided request.
         Uses text expansion for better prompt quality.
@@ -117,12 +118,12 @@ class ImageGenerator(BaseGenerator):
             print(f"Number of images requested: {request.num_outputs}")
 
             # 2. Load pipeline if not already loaded
-            self._load_pipeline()
+            await asyncio.to_thread(self._load_pipeline)
 
             # 2.5 Encode prompts to handle long prompts (CLIP 77-token limit) via chunking
             print(f"--- [Image Phase] Encoding prompts ---")
-            prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = encode_infinite_prompt(
-                self._pipe, expanded_pos, expanded_neg
+            prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = await asyncio.to_thread(
+                encode_infinite_prompt, self._pipe, expanded_pos, expanded_neg
             )
 
             # 3. Generate images
@@ -137,16 +138,20 @@ class ImageGenerator(BaseGenerator):
                 guidance_scale = request.parameters.get("guidance_scale", 7.0)
                 num_inference_steps = request.parameters.get("num_inference_steps", 30)
 
-                image = self._pipe(
-                    prompt_embeds=prompt_embeds,
-                    negative_prompt_embeds=negative_prompt_embeds,
-                    pooled_prompt_embeds=pooled_prompt_embeds,
-                    negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
-                    guidance_scale=guidance_scale, 
-                    num_inference_steps=num_inference_steps,
-                    width=width,
-                    height=height
-                ).images[0]
+                # Use to_thread for the heavy synchronous pipeline call
+                result = await asyncio.to_thread(
+                    lambda: self._pipe(
+                        prompt_embeds=prompt_embeds,
+                        negative_prompt_embeds=negative_prompt_embeds,
+                        pooled_prompt_embeds=pooled_prompt_embeds,
+                        negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+                        guidance_scale=guidance_scale, 
+                        num_inference_steps=num_inference_steps,
+                        width=width,
+                        height=height
+                    )
+                )
+                image = result.images[0]
 
                 # Always get bytes
                 buffer = io.BytesIO()
@@ -157,7 +162,7 @@ class ImageGenerator(BaseGenerator):
                 # Check for streaming callback
                 on_image_ready = request.parameters.get("on_image_ready")
                 if on_image_ready:
-                    on_image_ready(img_bytes, {
+                    await asyncio.to_thread(on_image_ready, img_bytes, {
                         "positive_prompt": expanded_pos,
                         "negative_prompt": expanded_neg,
                         "model_id": self._model_id

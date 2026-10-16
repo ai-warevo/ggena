@@ -13,7 +13,7 @@ class BaseGenerator(ABC):
     """
 
     @abstractmethod
-    def generate(self, request: GenerationRequest) -> GenerationResponse:
+    async def generate(self, request: GenerationRequest) -> GenerationResponse:
         """
         Generates content based on the provided request.
 

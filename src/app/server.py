@@ -83,7 +83,7 @@ async def generate(module: str, request: RequestModel):
     print(f"--- [Server] Processing request for '{module}': {request.prompt} ---")
     
     try:
-        response = generator.generate(core_request)
+        response = await generator.generate(core_request)
         if not response.success:
             raise HTTPException(status_code=500, detail=response.error_message)
         return response
@@ -180,15 +180,11 @@ async def websocket_generate(websocket: WebSocket, module: str):
 
                 print(f"--- [WS] Starting generation for '{module}' ---")
 
-                def run_generation():
-                    try:
-                        return generator.generate(core_request)
-                    except Exception as e:
-                        print(f"--- [WS] Generation error in thread: {e} ---")
-                        return None
-
-                # Execute in thread pool to avoid blocking the event loop
-                response = await loop.run_in_executor(None, run_generation)
+                try:
+                    response = await generator.generate(core_request)
+                except Exception as e:
+                    print(f"--- [WS] Generation error: {e} ---")
+                    response = None
 
                 if response is None or not response.success:
                     error_msg = response.error_message if response else "Unknown error"
