@@ -67,7 +67,7 @@ body {
     background-color: var(--error-color);
 }
 
-.status-badge.connected .dot {
+.status-badge .dot.connected {
     background-color: var(--success-color);
 }
 
