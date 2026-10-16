@@ -66,19 +66,19 @@ async def main():
             for p in args.param:
                 try:
                     key, value = p.split('=', 1)
-                    # Try to convert to int/float if possible
-                    try:
-                        if '.' in value:
-                            value = float(value)
-                        else:
-                            value = int(value)
-                    except ValueError:
-                        pass # Keep as string
                     extra_params[key] = value
                 except ValueError:
                     logger.warning(f"Invalid parameter format '{p}'. Use key=value.")
-        
-        # 4. Construct Request
+
+        # 4. Validate extra parameters using generator's schema
+        if generator.parameter_schema:
+            try:
+                validated_model = generator.parameter_schema.model_validate(extra_params)
+                extra_params = validated_model.model_dump()
+            except Exception as e:
+                raise ValidationError(f"Invalid parameters for '{args.module}': {str(e)}")
+
+        # 5. Construct Request
         num_outputs = args.num_outputs if args.num_outputs is not None else extra_params.pop("num_outputs", 1)
 
         request = GenerationRequest(
