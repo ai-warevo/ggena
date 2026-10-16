@@ -3,6 +3,7 @@ import asyncio
 import base64
 import torch
 import threading
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +19,9 @@ from src.core.exceptions import GgenaError, ValidationError, GeneratorError, Reg
 from src.core.config import ConfigManager
 from src.core.commands import GenerationCommand, CommandContext
 from src.core.executor import CommandExecutor
+from src.core.logging_setup import setup_logging
+
+logger = logging.getLogger(__name__)
 
 # Pydantic models for FastAPI request/response validation
 class RequestModel(BaseModel):
@@ -48,7 +52,8 @@ def get_registry() -> GeneratorRegistry:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("--- [Server] Starting up ---")
+    setup_logging()
+    logger.info("--- [Server] Starting up ---")
     # 1. Initialize core components
     config = ConfigManager()
     registry = GeneratorRegistry()
@@ -65,18 +70,18 @@ async def lifespan(app: FastAPI):
 
     # 2. Pre-load models by getting singleton instances and setting shutdown event
     available = registry.list_available()
-    print(f"--- [Server] Available modules: {available} ---")
+    logger.info(f"--- [Server] Available modules: {available} ---")
     for module in available:
-        print(f"--- [Server] Pre-loading model for '{module}'... ---")
+        logger.info(f"--- [Server] Pre-loading model for '{module}'... ---")
         generator = registry.get_instance(module, config=config, registry=registry)
     
     # RTX 4080 Optimizations
     torch.backends.cuda.matmul.allow_tf32 = True
-    print("--- [Server] All models pre-loaded and GPU optimized! ---")
+    logger.info("--- [Server] All models pre-loaded and GPU optimized! ---")
 
     yield
 
-    print("--- [Server] Shutting down ---")
+    logger.info("--- [Server] Shutting down ---")
     shutdown_event.set()
     # Allow a small grace period for generators to catch the event
     await asyncio.sleep(1)
@@ -124,7 +129,7 @@ async def generate(module: str, request: RequestModel):
             parameters=validated_params
         )
 
-        print(f"--- [Server] Processing request for '{module}': {request.prompt} ---")
+        logger.info(f"--- [Server] Processing request for '{module}': {request.prompt} ---")
         
         command = GenerationCommand(module=module, request=core_request)
         result = await app.state.executor.execute(command)
@@ -143,7 +148,7 @@ async def generate(module: str, request: RequestModel):
     except GgenaError as e:
         raise HTTPException(status_code=500, detail=f"Framework error: {str(e)}")
     except Exception as e:
-        print(f"--- [Server] Unexpected error during generation: {str(e)} ---")
+        logger.error(f"--- [Server] Unexpected error during generation: {str(e)} ---")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @app.websocket("/ws/generate/{module}")
@@ -152,7 +157,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
     WebSocket endpoint for real-time generation with progress updates.
     """
     await websocket.accept()
-    print(f"--- [WS] Connection established for module '{module}' ---")
+    logger.info(f"--- [WS] Connection established for module '{module}' ---")
     loop = asyncio.get_running_loop()
 
     try:
@@ -162,10 +167,10 @@ async def websocket_generate(websocket: WebSocket, module: str):
         while True:
             # Wait for a message from the client
             data = await websocket.receive_json()
-            print(f"--- [WS] Received message: {data} ---")
+            logger.debug(f"--- [WS] Received message: {data} ---")
             
             if data.get("type") == "generate":
-                print(f"--- [WS] 'generate' type detected for module '{module}' ---")
+                logger.info(f"--- [WS] 'generate' type detected for module '{module}' ---")
                 try:
                     generator = registry.get_instance(module, config=app.state.config, registry=app.state.registry)
                     if not generator:
@@ -181,7 +186,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
                     height = int(data.get("height", 1024))
                     num_outputs = int(data.get("num_outputs", 1))
 
-                    print(f"--- [WS] Parameters: prompt='{prompt}', steps={steps}, cfg={cfg_scale}, res={width}x{height}, num_outputs={num_outputs} ---")
+                    logger.info(f"--- [WS] Parameters: prompt='{prompt}', steps={steps}, cfg={cfg_scale}, res={width}x{height}, num_outputs={num_outputs} ---")
 
                     # Define the callback to send progress via WebSocket
                     def create_callback(total_steps):
@@ -212,7 +217,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
                                 }
                                 asyncio.run_coroutine_threadsafe(websocket.send_json(image_data), loop)
                             except Exception as e:
-                                print(f"--- [WS] Error in on_image_ready callback: {e} ---")
+                                logger.error(f"--- [WS] Error in on_image_ready callback: {e} ---")
 
                         return on_image_ready, lambda: images_sent_via_streaming
                     
@@ -235,18 +240,18 @@ async def websocket_generate(websocket: WebSocket, module: str):
                         }
                     )
 
-                    print(f"--- [WS] Starting generation for '{module}' ---")
+                    logger.info(f"--- [WS] Starting generation for '{module}' ---")
                     
                     response = await generator.generate(core_request)
                     if not response.success:
                         error_msg = response.error_message or "Unknown error"
-                        print(f"--- [WS] Generation failed: {error_msg} ---")
+                        logger.error(f"--- [WS] Generation failed: {error_msg} ---")
                         await websocket.send_json({"type": "error", "message": error_msg})
                     else:
                         if get_streaming_status():
-                            print(f"--- [WS] Generation successful (images already streamed)! ---")
+                            logger.info(f"--- [WS] Generation successful (images already streamed)! ---")
                         else:
-                            print(f"--- [WS] Generation successful! Sending images... ---")
+                            logger.info(f"--- [WS] Generation successful! Sending images... ---")
                             # Convert output to Base64 and send as a list
                             if response.output_files_bytes:
                                 try:
@@ -262,30 +267,30 @@ async def websocket_generate(websocket: WebSocket, module: str):
                                         "negative_prompt": response.metadata.get("negative_prompt")
                                     })
                                 except Exception as e:
-                                    print(f"--- [WS] Error encoding image bytes: {e} ---")
+                                    logger.error(f"--- [WS] Error encoding image bytes: {e} ---")
                                     await websocket.send_json({"type": "error", "message": f"Failed to encode images: {e}"})
 
                 except RegistryError as e:
-                    print(f"--- [WS] Registry error: {e} ---")
+                    logger.error(f"--- [WS] Registry error: {e} ---")
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except ValidationError as e:
-                    print(f"--- [WS] Validation error: {e} ---")
+                    logger.error(f"--- [WS] Validation error: {e} ---")
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except GeneratorError as e:
-                    print(f"--- [WS] Generation error: {e} ---")
+                    logger.error(f"--- [WS] Generation error: {e} ---")
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except GgenaError as e:
-                    print(f"--- [WS] Framework error: {e} ---")
+                    logger.error(f"--- [WS] Framework error: {e} ---")
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except Exception as e:
-                    print(f"--- [WS] Unexpected error in loop: {e} ---")
+                    logger.error(f"--- [WS] Unexpected error in loop: {e} ---")
                     await websocket.send_json({"type": "error", "message": f"Unexpected error: {str(e)}"})
 
             except WebSocketDisconnect:
-                print(f"--- [WS] Client disconnected from module '{module}' ---")
+                logger.info(f"--- [WS] Client disconnected from module '{module}' ---")
                 break
             except Exception as e:
-                print(f"--- [WS] Unexpected error in loop: {e} ---")
+                logger.error(f"--- [WS] Unexpected error in loop: {e} ---")
                 try:
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except:

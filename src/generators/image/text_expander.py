@@ -2,9 +2,12 @@ import torch
 import os
 import json
 import re
+import logging
 from dotenv import load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.core.config import config
+
+logger = logging.getLogger(__name__)
 
 def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
     """
@@ -13,7 +16,7 @@ def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
     """
     model_id = config.get_str("TEXT_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
     hf_token = config.get_str("HF_TOKEN")
-    print(f"--- [Text Phase] Loading text model '{model_id}' ---")
+    logger.info(f"--- [Text Phase] Loading text model '{model_id}' ---")
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
@@ -62,7 +65,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
         )
         model_inputs = tokenizer([text], return_tensors="pt").to("cuda")
 
-        print(f"Expanding prompt: '{user_input}'")
+        logger.info(f"Expanding prompt: '{user_input}'")
         generated_ids = model.generate(
             **model_inputs, 
             max_new_tokens=128,
@@ -75,7 +78,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
             output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
         ]
         response = tokenizer.batch_decode(response_ids, skip_special_tokens=True)[0].strip()
-        print(f"--- [Text Phase] Response: {response}")
+        logger.debug(f"--- [Text Phase] Response: {response}")
 
         # Robustly extract JSON content if it's wrapped in markdown or has surrounding text
         json_start = response.find('{')
@@ -98,10 +101,10 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
                 }
             else:
                 raise
-
+        
         # --- [Text Phase] Second Pass: Refinement of Positive Prompt ---
         try:
-            print(f"--- [Text Phase] Initial Positive: {data['positive']}")
+            logger.info(f"--- [Text Phase] Initial Positive: {data['positive']}")
             refinement_messages = [
                 {"role": "system", "content": "You are a Token Deduplication and Consistency layer. Your function is to perform a single-pass validation on a provided token stream to ensure structural integrity, remove redundant entries, and resolve logical contradictions within the sequence. You must maintain strict adherence to existing token values."},
                 {"role": "user", "content": f"Input Data:\nOriginal Intent: {user_input}\nCritical Refinement Rules: {refinement_guidelines}\nCurrent Token Stream: {data['positive']}\n\nTask:\n1. Deduplicate tokens in the Current Token Stream.\n2. Resolve logical contradictions (e.g., conflicting camera angles).\n3. MANDATORY PRESERVATION: You are strictly forbidden from modifying, deleting, or altering any tokens that match the 'Original Intent' or appear within the 'Critical Refinement Rules'. All production-critical keywords must be preserved verbatim.\n4. FORMATTING: Maintain standard comma-and-space delimiter formatting (', '). Do not alter casing, do not replace spaces with underscores, and do not append additional metadata.\n\nOutput ONLY the refined token stream."}
@@ -114,7 +117,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
             )
             model_inputs_refine = tokenizer([refinement_text], return_tensors="pt").to("cuda")
 
-            print(f"--- [Text Phase] Refining positive prompt...")
+            logger.info("--- [Text Phase] Refining positive prompt...")
             generated_ids_refine = model.generate(
                 **model_inputs_refine, 
                 max_new_tokens=128,
@@ -125,7 +128,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs_refine.input_ids, generated_ids_refine)
             ]
             refined_pos = tokenizer.batch_decode(response_ids_refine, skip_special_tokens=True)[0].strip()
-            print(f"--- [Text Phase] Refined Positive: {refined_pos}")
+            logger.info(f"--- [Text Phase] Refined Positive: {refined_pos}")
 
             # Ensure quality starters are present in the refined positive prompt
             quality_starters = "score_9, score_8_up, score_7_up,"
@@ -134,7 +137,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
             
             data["positive"] = refined_pos
         except Exception as e:
-            print(f"--- [Text Phase] Refinement failed, using initial tags: {e} ---")
+            logger.warning(f"--- [Text Phase] Refinement failed, using initial tags: {e} ---")
 
         del model
         del tokenizer
@@ -143,7 +146,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
         return data["positive"], data["negative"]
 
     except Exception as e:
-        print(f"--- [Text Phase] Error or parsing failure: {e} ---")
+        logger.error(f"--- [Text Phase] Error or parsing failure: {e} ---")
         fallback_pos = f"score_9, score_8_up, score_7_up, {user_input}"
         fallback_neg = "score_4, score_5, score_6, low quality, bad anatomy"
 

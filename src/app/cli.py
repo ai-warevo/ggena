@@ -5,11 +5,26 @@ import asyncio
 import threading
 import signal
 from datetime import datetime
+import logging
 
 from src.core.commands import GenerationCommand, CommandContext
 from src.core.executor import CommandExecutor
+from src.core.types import GenerationRequest
+from src.core.registry import GeneratorRegistry
+from src.core.utils import discover_and_register_generators
+from src.core.config import ConfigManager
+from src.core.exceptions import (
+    RegistryError, 
+    ValidationError, 
+    GeneratorError, 
+    GgenaError
+)
+from src.core.logging_setup import setup_logging
+
+logger = logging.getLogger(__name__)
 
 async def main():
+    setup_logging()
     parser = argparse.ArgumentParser(description="AI Generator Orchestrator")
     parser.add_argument("module", help="The name of the generator module (e.g., 'image', 'audio')")
     parser.add_argument("prompt", nargs="?", help="Prompt for the generation")
@@ -31,7 +46,7 @@ async def main():
     discover_and_register_generators("src.generators", registry)
 
     if not args.prompt:
-        print("Error: Prompt is required.")
+        logger.error("Prompt is required.")
         parser.print_help()
         sys.exit(1)
 
@@ -61,7 +76,7 @@ async def main():
                         pass # Keep as string
                     extra_params[key] = value
                 except ValueError:
-                    print(f"Warning: Invalid parameter format '{p}'. Use key=value.")
+                    logger.warning(f"Invalid parameter format '{p}'. Use key=value.")
         
         # 4. Construct Request
         num_outputs = args.num_outputs if args.num_outputs is not None else extra_params.pop("num_outputs", 1)
@@ -76,14 +91,14 @@ async def main():
         shutdown_event = threading.Event()
 
         def handle_sigint(sig, frame):
-            print("\n[Orchestrator] Interrupt received (CTRL+C). Signaling shutdown...")
+            logger.info("[Orchestrator] Interrupt received (CTRL+C). Signaling shutdown...")
             shutdown_event.set()
 
         # Register signal handler for SIGINT (CTRL+C)
         signal.signal(signal.SIGINT, handle_sigint)
 
         # 5. Execute generation via Command Pattern
-        print(f"--- [Orchestrator] Dispatching request to '{args.module}' generator ---")
+        logger.info(f"--- [Orchestrator] Dispatching request to '{args.module}' generator ---")
         
         context = CommandContext(registry=registry, config=config, shutdown_event=shutdown_event)
         executor = CommandExecutor(context)
@@ -93,7 +108,7 @@ async def main():
         # 6. Handle Response
         if result.success:
             response = result.result
-            print("\n--- [Orchestrator] Generation Successful! ---")
+            logger.info("--- [Orchestrator] Generation Successful! ---")
             
             # If user requested output saving
             if args.output and response.output_files_bytes:
@@ -119,37 +134,37 @@ async def main():
                     full_path = os.path.join(base_dir, filename)
                     with open(full_path, "wb") as f:
                         f.write(img_bytes)
-                    print(f"  - Saved to: {full_path}")
+                    logger.info(f"  - Saved to: {full_path}")
             elif response.output_files_bytes:
-                print(f"  - Generated {len(response.output_files_bytes)} files (use --output to save)")
+                logger.info(f"  - Generated {len(response.output_files_bytes)} files (use --output to save)")
             else:
-                print("  - No file data returned.")
+                logger.info("  - No file data returned.")
 
             if response.metadata:
-                print(f"Metadata: {response.metadata}")
+                logger.info(f"Metadata: {response.metadata}")
         else:
-            print("\n--- [Orchestrator] Generation Failed ---")
-            print(f"Error: {result.error_message}")
+            logger.error("--- [Orchestrator] Generation Failed ---")
+            logger.error(f"Error: {result.error_message}")
             sys.exit(1)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
-        print("\n--- [Orchestrator] Generation interrupted by user ---")
+        logger.warning("--- [Orchestrator] Generation interrupted by user ---")
         sys.exit(1)
     except RegistryError as e:
-        print(f"\n[Registry Error] {e}")
+        logger.error(f"[Registry Error] {e}")
         sys.exit(1)
     except ValidationError as e:
-        print(f"\n[Validation Error] {e}")
+        logger.error(f"[Validation Error] {e}")
         sys.exit(1)
     except GeneratorError as e:
-        print(f"\n[Generator Error] {e}")
+        logger.error(f"[Generator Error] {e}")
         sys.exit(1)
     except GgenaError as e:
-        print(f"\n[Framework Error] {e}")
+        logger.error(f"[Framework Error] {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"\n--- [Orchestrator] Unexpected error during execution ---")
-        print(str(e))
+        logger.error("--- [Orchestrator] Unexpected error during execution ---")
+        logger.exception(str(e))
         sys.exit(1)
 
 if __name__ == "__main__":

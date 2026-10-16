@@ -4,6 +4,7 @@ import io
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Callable, Type
 import asyncio
+import logging
 
 from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 from src.generators.base import BaseGenerator
@@ -11,6 +12,8 @@ from src.core.types import GenerationRequest, GenerationResponse
 from src.core.exceptions import GeneratorError, ValidationError, GenerationCancelledError
 from src.core.config import config
 from .text_expander import translate_user_intent_to_tags
+
+logger = logging.getLogger(__name__)
 
 def encode_infinite_prompt(pipe, prompt_text, negative_prompt_text):
     """Helper to encode long prompts by chunking them logically."""
@@ -98,7 +101,7 @@ class ImageGenerator(BaseGenerator):
 
     def _load_pipeline(self):
         if self._pipe is None:
-            print(f"Loading model '{self._model_id}' to GPU...")
+            logger.info(f"Loading model '{self._model_id}' to GPU...")
             # Use injected config if available, otherwise fallback
             hf_token = None
             if self._config:
@@ -123,7 +126,7 @@ class ImageGenerator(BaseGenerator):
         Uses text expansion for better prompt quality.
         Returns image bytes in output_images.
         """
-        print(f"--- [Image Phase] Starting Image Generation ---")
+        logger.info("--- [Image Phase] Starting Image Generation ---")
         
         try:
             # 1. Determine Prompts (Priority: Request > Text Expander)
@@ -134,7 +137,7 @@ class ImageGenerator(BaseGenerator):
                 expanded_pos = req_pos
                 expanded_neg = req_neg if req_neg else ""
             elif request.prompt:
-                print(f"--- [Image Phase] Expanding original prompt ---")
+                logger.info("--- [Image Phase] Expanding original prompt ---")
                 exp_pos, exp_neg_from_llm = translate_user_intent_to_tags(request.prompt)
                 expanded_pos = exp_pos
                 expanded_neg = req_neg if req_neg else exp_neg_from_llm
@@ -142,16 +145,16 @@ class ImageGenerator(BaseGenerator):
                 expanded_pos = ""
                 expanded_neg = ""
 
-            print(f"Original Prompt: {request.prompt}")
-            print(f"Expanded Positive Prompt: {expanded_pos}")
-            print(f"Expanded Negative Prompt: {expanded_neg}")
-            print(f"Number of images requested: {request.num_outputs}")
+            logger.info(f"Original Prompt: {request.prompt}")
+            logger.info(f"Expanded Positive Prompt: {expanded_pos}")
+            logger.info(f"Expanded Negative Prompt: {expanded_neg}")
+            logger.info(f"Number of images requested: {request.num_outputs}")
 
             # 2. Load pipeline if not already loaded
             await asyncio.to_thread(self._load_pipeline)
 
             # 2.5 Encode prompts to handle long prompts (CLIP 77-token limit) via chunking
-            print(f"--- [Image Phase] Encoding prompts ---")
+            logger.info("--- [Image Phase] Encoding prompts ---")
             prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = await asyncio.to_thread(
                 encode_infinite_prompt, self._pipe, expanded_pos, expanded_neg
             )
@@ -168,10 +171,10 @@ class ImageGenerator(BaseGenerator):
 
             for i in range(request.num_outputs):
                 if self._shutdown_event and self._shutdown_event.is_set():
-                    print("--- [Image Phase] Shutdown signal detected before starting next image! ---")
+                    logger.warning("--- [Image Phase] Shutdown signal detected before starting next image! ---")
                     raise GenerationCancelledError("Generation cancelled due to shutdown.")
 
-                print(f"\nGenerating image {i+1}/{request.num_outputs}...")
+                logger.info(f"Generating image {i+1}/{request.num_outputs}...")
                 
                 # Use validated parameters
                 width = params.width
@@ -183,7 +186,7 @@ class ImageGenerator(BaseGenerator):
                 original_callback = params.callback_on_step_end
                 def wrapped_callback(pipe, step_index, timestep, callback_kwargs):
                     if self._shutdown_event and self._shutdown_event.is_set():
-                        print("--- [Image Phase] Shutdown signal detected in callback! ---")
+                        logger.warning("--- [Image Phase] Shutdown signal detected in callback! ---")
                         raise GenerationCancelledError("Generation cancelled due to shutdown.")
                     if original_callback:
                         return original_callback(pipe, step_index, timestep, callback_kwargs)
@@ -220,7 +223,7 @@ class ImageGenerator(BaseGenerator):
                         "model_id": self._model_id
                     })
 
-            print("\n--- All images generated successfully! ---")
+            logger.info("--- All images generated successfully! ---")
             return GenerationResponse(
                 success=True, 
                 output_files_bytes=output_files_bytes,
@@ -232,20 +235,20 @@ class ImageGenerator(BaseGenerator):
             )
 
         except GenerationCancelledError as e:
-            print(f"--- [Image Phase] Generation cancelled: {e} ---")
+            logger.warning(f"--- [Image Phase] Generation cancelled: {e} ---")
             return GenerationResponse(
                 success=False, 
                 error_message=str(e)
             )
         except ValidationError as e:
-            print(f"--- [Image Phase] Validation error: {e} ---")
+            logger.error(f"--- [Image Phase] Validation error: {e} ---")
             return GenerationResponse(
                 success=False, 
                 error_message=str(e)
             )
         except Exception as e:
-            print(f"--- Error during image generation ---")
-            print(str(e))
+            logger.error("--- Error during image generation ---")
+            logger.exception(str(e))
             return GenerationResponse(
                 success=False, 
                 error_message=str(e)
