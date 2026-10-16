@@ -1,5 +1,6 @@
 from typing import Dict, Type, Any, Optional
 from src.generators.base import BaseGenerator
+from src.core.exceptions import RegistryError
 
 class GeneratorRegistry:
     """
@@ -24,7 +25,7 @@ class GeneratorRegistry:
             generator_class (Type[BaseGenerator]): The class of the generator to register.
         """
         if not issubclass(generator_class, BaseGenerator):
-            raise TypeError(f"Class {generator_class.__name__} must inherit from BaseGenerator")
+            raise RegistryError(f"Class {generator_class.__name__} must inherit from BaseGenerator")
         
         self._registry[name] = generator_class
 

@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Callable, Type
 import asyncio
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 from src.generators.base import BaseGenerator
-from src.core.types import GenerationRequest, GenerationResponse, GenerationCancelledError
+from src.core.types import GenerationRequest, GenerationResponse
+from src.core.exceptions import GeneratorError, ValidationError, GenerationCancelledError
 from src.core.config import config
 from .text_expander import translate_user_intent_to_tags
 
@@ -147,7 +148,10 @@ class ImageGenerator(BaseGenerator):
             timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
 
             # Validate parameters using the schema
-            params = ImageParameters(**request.parameters)
+            try:
+                params = ImageParameters(**request.parameters)
+            except PydanticValidationError as e:
+                raise ValidationError(f"Invalid image parameters: {str(e)}", details=e.errors())
 
             for i in range(request.num_outputs):
                 if self._shutdown_event and self._shutdown_event.is_set():
@@ -216,6 +220,12 @@ class ImageGenerator(BaseGenerator):
 
         except GenerationCancelledError as e:
             print(f"--- [Image Phase] Generation cancelled: {e} ---")
+            return GenerationResponse(
+                success=False, 
+                error_message=str(e)
+            )
+        except ValidationError as e:
+            print(f"--- [Image Phase] Validation error: {e} ---")
             return GenerationResponse(
                 success=False, 
                 error_message=str(e)
