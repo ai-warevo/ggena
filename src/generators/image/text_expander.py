@@ -3,13 +3,14 @@ import os
 import json
 import re
 import logging
+import asyncio
 from dotenv import load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.core.config import config
 
 logger = logging.getLogger(__name__)
 
-def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
+async def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
     """
     Uses a lightweight LLM to expand user natural language into Danbooru-style tags.
     Ensures VRAM is cleared after execution.
@@ -19,8 +20,9 @@ def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
     logger.info(f"--- [Text Phase] Loading text model '{model_id}' ---")
 
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
-        model = AutoModelForCausalLM.from_pretrained(
+        tokenizer = await asyncio.to_thread(AutoTokenizer.from_pretrained, model_id, token=hf_token)
+        model = await asyncio.to_thread(
+            AutoModelForCausalLM.from_pretrained,
             model_id, 
             dtype=torch.float16, 
             device_map="cuda",
@@ -58,15 +60,14 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
             {"role": "user", "content": user_input},
         ]
 
-        text = tokenizer.apply_chat_template(
-            messages, 
-            tokenize=False, 
-            add_generation_prompt=True
-        )
-        model_inputs = tokenizer([text], return_tensors="pt").to("cuda")
+        text = await asyncio.to_thread(tokenizer.apply_chat_template, messages, tokenize=False, add_generation_prompt=True)
+        model_inputs = await asyncio.to_thread(tokenizer, [text], return_tensors="pt")
+        # Move to cuda if not already there (though tokenizer might have done it or it's on CPU)
+        model_inputs = {k: v.to("cuda") for k, v in model_inputs.items()}
 
         logger.info(f"Expanding prompt: '{user_input}'")
-        generated_ids = model.generate(
+        generated_ids = await asyncio.to_thread(
+            model.generate,
             **model_inputs, 
             max_new_tokens=128,
             do_sample=True,
@@ -77,7 +78,8 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
         response_ids = [
             output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
         ]
-        response = tokenizer.batch_decode(response_ids, skip_special_tokens=True)[0].strip()
+        response = await asyncio.to_thread(tokenizer.batch_decode, response_ids, skip_special_tokens=True)
+        response = response[0].strip()
         logger.debug(f"--- [Text Phase] Response: {response}")
 
         # Robustly extract JSON content if it's wrapped in markdown or has surrounding text
@@ -110,15 +112,13 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
                 {"role": "user", "content": f"Input Data:\nOriginal Intent: {user_input}\nCritical Refinement Rules: {refinement_guidelines}\nCurrent Token Stream: {data['positive']}\n\nTask:\n1. Deduplicate tokens in the Current Token Stream.\n2. Resolve logical contradictions (e.g., conflicting camera angles).\n3. MANDATORY PRESERVATION: You are strictly forbidden from modifying, deleting, or altering any tokens that match the 'Original Intent' or appear within the 'Critical Refinement Rules'. All production-critical keywords must be preserved verbatim.\n4. FORMATTING: Maintain standard comma-and-space delimiter formatting (', '). Do not alter casing, do not replace spaces with underscores, and do not append additional metadata.\n\nOutput ONLY the refined token stream."}
             ]
 
-            refinement_text = tokenizer.apply_chat_template(
-                refinement_messages, 
-                tokenize=False, 
-                add_generation_prompt=True
-            )
-            model_inputs_refine = tokenizer([refinement_text], return_tensors="pt").to("cuda")
+            refinement_text = await asyncio.to_thread(tokenizer.apply_chat_template, refinement_messages, tokenize=False, add_generation_prompt=True)
+            model_inputs_refine = await asyncio.to_thread(tokenizer, [refinement_text], return_tensors="pt")
+            model_inputs_refine = {k: v.to("cuda") for k, v in model_inputs_refine.items()}
 
             logger.info("--- [Text Phase] Refining positive prompt...")
-            generated_ids_refine = model.generate(
+            generated_ids_refine = await asyncio.to_thread(
+                model.generate,
                 **model_inputs_refine, 
                 max_new_tokens=128,
                 do_sample=False,
@@ -127,7 +127,8 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
             response_ids_refine = [
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs_refine.input_ids, generated_ids_refine)
             ]
-            refined_pos = tokenizer.batch_decode(response_ids_refine, skip_special_tokens=True)[0].strip()
+            refined_pos = await asyncio.to_thread(tokenizer.batch_decode, response_ids_refine, skip_special_tokens=True)
+            refined_pos = refined_pos[0].strip()
             logger.info(f"--- [Text Phase] Refined Positive: {refined_pos}")
 
             # Ensure quality starters are present in the refined positive prompt

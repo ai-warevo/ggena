@@ -138,7 +138,7 @@ class ImageGenerator(BaseGenerator):
                 expanded_neg = req_neg if req_neg else ""
             elif request.prompt:
                 logger.info("--- [Image Phase] Expanding original prompt ---")
-                exp_pos, exp_neg_from_llm = translate_user_intent_to_tags(request.prompt)
+                exp_pos, exp_neg_from_llm = await translate_user_intent_to_tags(request.prompt)
                 expanded_pos = exp_pos
                 expanded_neg = req_neg if req_neg else exp_neg_from_llm
             else:
@@ -229,7 +229,7 @@ class ImageGenerator(BaseGenerator):
 
                     # Always get bytes
                     buffer = io.BytesIO()
-                    image.save(buffer, format="PNG")
+                    await asyncio.to_thread(image.save, buffer, format="PNG")
                     img_bytes = buffer.getvalue()
                     output_files_bytes.append(img_bytes)
 
