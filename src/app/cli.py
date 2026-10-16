@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+import asyncio
 from datetime import datetime
 
 from src.core.registry import registry
@@ -8,7 +9,7 @@ from src.core.types import GenerationRequest
 from src.core.config import config
 from src.core.utils import discover_and_register_generators
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="AI Generator Orchestrator")
     parser.add_argument("module", help="The name of the generator module (e.g., 'image', 'audio')")
     parser.add_argument("prompt", nargs="?", help="Prompt for the generation")
@@ -69,7 +70,7 @@ def main():
     # 5. Execute generation
     print(f"--- [Orchestrator] Dispatching request to '{args.module}' generator ---")
     try:
-        response = generator.generate(request)
+        response = await generator.generate(request)
 
         # 6. Handle Response
         if response.success:
@@ -117,4 +118,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
