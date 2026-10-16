@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Callable, Type
 import asyncio
 import logging
+import os
+import re
 
 from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 from src.generators.base import BaseGenerator
@@ -140,6 +142,7 @@ class ImageGenerator(BaseGenerator):
                 logger.info("--- [Image Phase] Expanding original prompt ---")
                 exp_pos, exp_neg_from_llm = await translate_user_intent_to_tags(request.prompt)
                 expanded_pos = exp_pos
+                req_pos = exp_pos
                 expanded_neg = req_neg if req_neg else exp_neg_from_llm
             else:
                 expanded_pos = ""
@@ -152,6 +155,24 @@ class ImageGenerator(BaseGenerator):
 
             # 2. Load pipeline if not already loaded
             await asyncio.to_thread(self._load_pipeline)
+
+            # --- [LoRA Phase] Dynamic LoRA loading ---
+            lora_pattern = r'<lora:(.*?):([\d\.]+)>'
+            matches = list(re.finditer(lora_pattern, expanded_pos))
+            if matches:
+                for match in matches:
+                    filename = match.group(1)
+                    weight = float(match.group(2))
+                    # Clean the text prompt string by completely removing the <lora...> block
+                    expanded_pos = expanded_pos.replace(match.group(0), "").strip()
+
+                    lora_path = f"civitai_cache/{filename}.safetensors"
+                    if os.path.exists(lora_path):
+                        logger.info(f"--- [LoRA Phase] Dynamically loading {filename}.safetensors with weight {weight} ---")
+                        self._pipe.load_lora_weights("civitai_cache/", weight_name=f"{filename}.safetensors", adapter_name=filename)
+                        self._pipe.set_adapters([filename], adapter_weights=[weight])
+                    else:
+                        logger.warning(f"--- [LoRA Warning] File not found at {lora_path} ---")
 
             # 2.5 Encode prompts to handle long prompts (CLIP 77-token limit) via chunking
             logger.info("--- [Image Phase] Encoding prompts ---")
@@ -236,18 +257,20 @@ class ImageGenerator(BaseGenerator):
                     # Check for streaming callback
                     if on_image_ready:
                         await asyncio.to_thread(on_image_ready, img_bytes, {
-                            "positive_prompt": expanded_pos,
+                            "positive_prompt": req_pos,
                             "negative_prompt": expanded_neg,
                             "model_id": self._model_id
                         })
 
             logger.info("--- All images generated successfully! ---")
+            logger.info("--- [LoRA Phase] Unloading LoRA weights from GPU memory ---")
+            self._pipe.unload_lora_weights()
             return GenerationResponse(
                 success=True, 
                 output_files_bytes=output_files_bytes,
                 metadata={
                     "model_id": self._model_id,
-                    "positive_prompt": expanded_pos,
+                    "positive_prompt": req_pos,
                     "negative_prompt": expanded_neg
                 }
             )

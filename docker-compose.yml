@@ -20,6 +20,7 @@ services:
     volumes:
       - .:/workspace
       - ./hf_cache:/root/.cache/huggingface
+      - ./civitai_cache:/workspace/civitai_cache
     environment:
       - HF_TOKEN=${HF_TOKEN}
     stdin_open: true

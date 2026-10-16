@@ -16,6 +16,7 @@ dependencies = [
     "pillow",
     "fastapi",
     "uvicorn[standard]",
+    "peft",
     "pydantic",
     "python-dotenv",
     "typing-extensions",

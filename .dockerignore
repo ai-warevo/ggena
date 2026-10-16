@@ -19,3 +19,4 @@ generated_image.png
 *.log
 outputs/
 hf_cache/
+civitai_cache/
