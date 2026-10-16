@@ -7,7 +7,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 from src.generators.base import BaseGenerator
-from src.core.types import GenerationRequest, GenerationResponse
+from src.core.types import GenerationRequest, GenerationResponse, GenerationCancelledError
 from src.core.config import config
 from .text_expander import translate_user_intent_to_tags
 
@@ -73,6 +73,7 @@ class ImageParameters(BaseModel):
     guidance_scale: float = Field(7.0, ge=1.0, le=20.0)
     num_inference_steps: int = Field(30, ge=1, le=100)
     on_image_ready: Optional[Callable[[bytes, Dict[str, Any]], Any]] = None
+    callback_on_step_end: Optional[Callable] = None
 
 class ImageGenerator(BaseGenerator):
     """
@@ -84,6 +85,7 @@ class ImageGenerator(BaseGenerator):
         return ImageParameters
 
     def __init__(self):
+        super().__init__()
         self._pipe: Optional[StableDiffusionXLPipeline] = None
         self._model_id: str = config.get_str("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
 
@@ -148,6 +150,10 @@ class ImageGenerator(BaseGenerator):
             params = ImageParameters(**request.parameters)
 
             for i in range(request.num_outputs):
+                if self._shutdown_event and self._shutdown_event.is_set():
+                    print("--- [Image Phase] Shutdown signal detected before starting next image! ---")
+                    raise GenerationCancelledError("Generation cancelled due to shutdown.")
+
                 print(f"\nGenerating image {i+1}/{request.num_outputs}...")
                 
                 # Use validated parameters
@@ -155,6 +161,16 @@ class ImageGenerator(BaseGenerator):
                 height = params.height
                 guidance_scale = params.guidance_scale
                 num_inference_steps = params.num_inference_steps
+
+                # Wrap the callback to check for shutdown
+                original_callback = params.callback_on_step_end
+                def wrapped_callback(pipe, step_index, timestep, callback_kwargs):
+                    if self._shutdown_event and self._shutdown_event.is_set():
+                        print("--- [Image Phase] Shutdown signal detected in callback! ---")
+                        raise GenerationCancelledError("Generation cancelled due to shutdown.")
+                    if original_callback:
+                        return original_callback(pipe, step_index, timestep, callback_kwargs)
+                    return callback_kwargs
 
                 # Use to_thread for the heavy synchronous pipeline call
                 result = await asyncio.to_thread(
@@ -166,7 +182,8 @@ class ImageGenerator(BaseGenerator):
                         guidance_scale=guidance_scale, 
                         num_inference_steps=num_inference_steps,
                         width=width,
-                        height=height
+                        height=height,
+                        callback_on_step_end=wrapped_callback
                     )
                 )
                 image = result.images[0]
@@ -197,6 +214,12 @@ class ImageGenerator(BaseGenerator):
                 }
             )
 
+        except GenerationCancelledError as e:
+            print(f"--- [Image Phase] Generation cancelled: {e} ---")
+            return GenerationResponse(
+                success=False, 
+                error_message=str(e)
+            )
         except Exception as e:
             print(f"--- Error during image generation ---")
             print(str(e))

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any, Type
+from typing import Any, Type, Optional
+import threading
 
 from pydantic import BaseModel
 from src.core.types import GenerationRequest, GenerationResponse
@@ -12,6 +13,13 @@ class BaseGenerator(ABC):
     must inherit from this class and implement the `generate` method. 
     This ensures a consistent interface across different modalities.
     """
+
+    def __init__(self):
+        self._shutdown_event: Optional[threading.Event] = None
+
+    def set_shutdown_event(self, event: threading.Event):
+        """Sets the event that will be used to signal shutdown."""
+        self._shutdown_event = event
 
     @property
     @abstractmethod

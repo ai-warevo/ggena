@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+class GenerationCancelledError(Exception):
+    """Raised when a generation is interrupted by a shutdown signal."""
+    pass
+
 @dataclass(frozen=True)
 class GenerationRequest:
     """

@@ -2,6 +2,8 @@ import uvicorn
 import asyncio
 import base64
 import torch
+import threading
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -27,7 +29,36 @@ class ResponseModel(BaseModel):
     metadata: Dict[str, Any] = {}
     error_message: Optional[str] = None
 
-app = FastAPI(title="ggena API Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("--- [Server] Starting up ---")
+    # 1. Discover and register all generators
+    discover_and_register_generators("src.generators")
+    
+    # Create a shutdown event to signal all running generators
+    shutdown_event = threading.Event()
+
+    # 2. Pre-load models by getting singleton instances and setting shutdown event
+    available = registry.list_available()
+    print(f"--- [Server] Available modules: {available} ---")
+    for module in available:
+        print(f"--- [Server] Pre-loading model for '{module}'... ---")
+        generator = registry.get_instance(module)
+        if hasattr(generator, "set_shutdown_event"):
+            generator.set_shutdown_event(shutdown_event)
+    
+    # RTX 4080 Optimizations
+    torch.backends.cuda.matmul.allow_tf32 = True
+    print("--- [Server] All models pre-loaded and GPU optimized! ---")
+
+    yield
+
+    print("--- [Server] Shutting down ---")
+    shutdown_event.set()
+    # Allow a small grace period for generators to catch the event
+    await asyncio.sleep(1)
+
+app = FastAPI(title="ggena API Server", lifespan=lifespan)
 
 # Enable CORS for frontend development
 app.add_middleware(
@@ -45,23 +76,6 @@ app.mount("/static", StaticFiles(directory="src/app/frontend"), name="static")
 async def read_index():
     """Serves the main frontend page."""
     return FileResponse("src/app/frontend/index.html")
-
-@app.on_event("startup")
-async def startup_event():
-    print("--- [Server] Starting up ---")
-    # 1. Discover and register all generators
-    discover_and_register_generators("src.generators")
-    
-    # 2. Pre-load models by getting singleton instances
-    available = registry.list_available()
-    print(f"--- [Server] Available modules: {available} ---")
-    for module in available:
-        print(f"--- [Server] Pre-loading model for '{module}'... ---")
-        registry.get_instance(module)
-    
-    # RTX 4080 Optimizations
-    torch.backends.cuda.matmul.allow_tf32 = True
-    print("--- [Server] All models pre-loaded and GPU optimized! ---")
 
 @app.post("/generate/{module}", response_model=ResponseModel)
 async def generate(module: str, request: RequestModel):
@@ -135,7 +149,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
 
                 # Define the callback to send progress via WebSocket
                 def create_callback(total_steps):
-                    async def callback_on_step_end(pipe, step_index, timestep, callback_kwargs):
+                    def callback_on_step_end(pipe, step_index, timestep, callback_kwargs):
                         progress_data = {
                             "type": "progress",
                             "step": step_index + 1,
@@ -165,7 +179,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
                             print(f"--- [WS] Error in on_image_ready callback: {e} ---")
 
                     return on_image_ready, lambda: images_sent_via_streaming
-
+                
                 callback = create_callback(steps)
                 on_image_ready, get_streaming_status = create_image_callback()
 

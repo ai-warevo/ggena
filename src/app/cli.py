@@ -2,6 +2,8 @@ import argparse
 import sys
 import os
 import asyncio
+import threading
+import signal
 from datetime import datetime
 
 from src.core.registry import registry
@@ -67,6 +69,18 @@ async def main():
         parameters=extra_params
     )
 
+    # Setup shutdown event and signal handling
+    shutdown_event = threading.Event()
+    if hasattr(generator, "set_shutdown_event"):
+        generator.set_shutdown_event(shutdown_event)
+
+    def handle_sigint(sig, frame):
+        print("\n[Orchestrator] Interrupt received (CTRL+C). Signaling shutdown...")
+        shutdown_event.set()
+
+    # Register signal handler for SIGINT (CTRL+C)
+    signal.signal(signal.SIGINT, handle_sigint)
+
     # 5. Execute generation
     print(f"--- [Orchestrator] Dispatching request to '{args.module}' generator ---")
     try:
@@ -112,10 +126,16 @@ async def main():
             print("\n--- [Orchestrator] Generation Failed ---")
             print(f"Error: {response.error_message}")
             sys.exit(1)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        print("\n--- [Orchestrator] Generation interrupted by user ---")
+        sys.exit(1)
     except Exception as e:
         print(f"\n--- [Orchestrator] Unexpected error during execution ---")
         print(str(e))
         sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
