@@ -26,11 +26,10 @@ class TestLightweightDI(unittest.TestCase):
         registry.register("dummy", DummyGenerator)
 
         # 2. Get instance with injected config
-        generator = registry.get("dummy", config=mock_config, registry=registry)
+        generator = registry.get("dummy", config=mock_config)
         
         self.assertIsNotNone(generator)
         self.assertEqual(generator._config, mock_config)
-        self.assertEqual(generator._registry, registry)
 
     def test_singleton_injection(self):
         mock_config = MagicMock(spec=ConfigManager)
@@ -38,9 +37,9 @@ class TestLightweightDI(unittest.TestCase):
         registry.register("dummy", DummyGenerator)
 
         # Get first instance (singleton)
-        gen1 = registry.get_instance("dummy", config=mock_config, registry=registry)
+        gen1 = registry.get_instance("dummy", config=mock_config)
         # Get second instance (should be same singleton)
-        gen2 = registry.get_instance("dummy", config=mock_config, registry=registry)
+        gen2 = registry.get_instance("dummy", config=mock_config)
 
         self.assertIs(gen1, gen2)
         self.assertEqual(gen1._config, mock_config)

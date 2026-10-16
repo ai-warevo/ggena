@@ -25,7 +25,7 @@ class GeneratorRegistry:
         
         self._registry[name] = generator_class
 
-    def get(self, name: str, config: Optional[ConfigManager] = None, registry: Optional['GeneratorRegistry'] = None) -> Optional[BaseGenerator]:
+    def get(self, name: str, config: Optional[ConfigManager] = None) -> Optional[BaseGenerator]:
         """
         Retrieves a NEW instance of the registered generator.
         Useful for CLI/one-off executions.
@@ -33,17 +33,16 @@ class GeneratorRegistry:
         Args:
             name (str): The identifier of the generator to retrieve.
             config (Optional[ConfigManager]): Configuration dependency to inject.
-            registry (Optional[GeneratorRegistry]): Registry dependency to inject.
             
         Returns:
             Optional[BaseGenerator]: A new instance of the generator, or None if not found.
         """
         generator_class = self._registry.get(name)
         if generator_class:
-            return generator_class(config=config, registry=registry)
+            return generator_class(config=config)
         return None
 
-    def get_instance(self, name: str, config: Optional[ConfigManager] = None, registry: Optional['GeneratorRegistry'] = None) -> Optional[BaseGenerator]:
+    def get_instance(self, name: str, config: Optional[ConfigManager] = None) -> Optional[BaseGenerator]:
         """
         Retrieves a singleton instance of the registered generator.
         Useful for long-running servers to keep models in memory.
@@ -51,7 +50,6 @@ class GeneratorRegistry:
         Args:
             name (str): The identifier of the generator to retrieve.
             config (Optional[ConfigManager]): Configuration dependency to inject.
-            registry (Optional[GeneratorRegistry]): Registry dependency to inject.
             
         Returns:
             Optional[BaseGenerator]: The cached instance of the generator, or None if not found.
@@ -59,7 +57,7 @@ class GeneratorRegistry:
         if name in self._instances:
             return self._instances[name]
         
-        generator = self.get(name, config=config, registry=registry)
+        generator = self.get(name, config=config)
         if generator:
             self._instances[name] = generator
             return generator

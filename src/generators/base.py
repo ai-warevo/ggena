@@ -5,7 +5,6 @@ import threading
 from pydantic import BaseModel
 from src.core.types import GenerationRequest, GenerationResponse
 from src.core.config import ConfigManager
-from src.core.registry import GeneratorRegistry
 
 class BaseGenerator(ABC):
     """
@@ -16,10 +15,9 @@ class BaseGenerator(ABC):
     This ensures a consistent interface across different modalities.
     """
 
-    def __init__(self, config: Optional[ConfigManager] = None, registry: Optional[GeneratorRegistry] = None):
+    def __init__(self, config: Optional[ConfigManager] = None):
         self._shutdown_event: Optional[threading.Event] = None
         self._config = config
-        self._registry = registry
 
     def set_shutdown_event(self, event: threading.Event):
         """Sets the event that will be used to signal shutdown."""

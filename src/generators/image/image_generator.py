@@ -88,8 +88,8 @@ class ImageGenerator(BaseGenerator):
     def parameter_schema(self) -> Type[BaseModel]:
         return ImageParameters
 
-    def __init__(self, config=None, registry=None):
-        super().__init__(config=config, registry=registry)
+    def __init__(self, config=None):
+        super().__init__(config=config)
         self._pipe: Optional[StableDiffusionXLPipeline] = None
         # Use injected config if available, otherwise fallback to a default (for backward compatibility during transition)
         if self._config:

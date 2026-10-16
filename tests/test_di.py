@@ -17,7 +17,7 @@ class TestDependencyInjection(unittest.TestCase):
         mock_registry = MagicMock(spec=GeneratorRegistry)
 
         # 3. Instantiate ImageGenerator with the mocked config
-        generator = ImageGenerator(config=mock_config, registry=mock_registry)
+        generator = ImageGenerator(config=mock_config)
 
         # 4. Verify that the generator uses the mocked config
         self.assertEqual(generator._model_id, "mock-model-id")
@@ -32,7 +32,7 @@ class TestDependencyInjection(unittest.TestCase):
                 "HF_TOKEN": "fallback-token"
             }.get(key, default)
 
-            generator = ImageGenerator(config=None, registry=None)
+            generator = ImageGenerator(config=None)
             self.assertEqual(generator._model_id, "fallback-model-id")
 
 if __name__ == "__main__":
