@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import Dict, Any, Optional, List
 
 from src.core.registry import registry
@@ -72,12 +72,19 @@ async def generate(module: str, request: RequestModel):
     if not generator:
         raise HTTPException(status_code=404, detail=f"Module '{module}' not found.")
 
+    # Validate parameters against the generator's schema
+    try:
+        schema = generator.parameter_schema
+        validated_params = schema(**request.parameters).model_dump()
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors())
+
     core_request = GenerationRequest(
         prompt=request.prompt,
         positive_prompt=request.positive_prompt,
         negative_prompt=request.negative_prompt,
         num_outputs=request.num_outputs,
-        parameters=request.parameters
+        parameters=validated_params
     )
 
     print(f"--- [Server] Processing request for '{module}': {request.prompt} ---")

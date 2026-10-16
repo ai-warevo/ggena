@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Type
 
+from pydantic import BaseModel
 from src.core.types import GenerationRequest, GenerationResponse
 
 class BaseGenerator(ABC):
@@ -11,6 +12,12 @@ class BaseGenerator(ABC):
     must inherit from this class and implement the `generate` method. 
     This ensures a consistent interface across different modalities.
     """
+
+    @property
+    @abstractmethod
+    def parameter_schema(self) -> Type[BaseModel]:
+        """Returns the Pydantic model used for validating parameters."""
+        pass
 
     @abstractmethod
     async def generate(self, request: GenerationRequest) -> GenerationResponse:

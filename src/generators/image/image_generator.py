@@ -2,9 +2,10 @@ import torch
 from diffusers import StableDiffusionXLPipeline
 import io
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Callable, Type
 import asyncio
 
+from pydantic import BaseModel, Field
 from src.generators.base import BaseGenerator
 from src.core.types import GenerationRequest, GenerationResponse
 from src.core.config import config
@@ -63,11 +64,24 @@ def encode_infinite_prompt(pipe, prompt_text, negative_prompt_text):
     
     return final_pos_embeds, final_neg_embeds, final_pooled_pos, final_pooled_neg
 
+class ImageParameters(BaseModel):
+    """
+    Pydantic model for validating image generation parameters.
+    """
+    width: int = Field(1024, ge=256, le=4096)
+    height: int = Field(768, ge=256, le=4096)
+    guidance_scale: float = Field(7.0, ge=1.0, le=20.0)
+    num_inference_steps: int = Field(30, ge=1, le=100)
+    on_image_ready: Optional[Callable[[bytes, Dict[str, Any]], Any]] = None
 
 class ImageGenerator(BaseGenerator):
     """
     Implementation of the Image Generation strategy using SDXL (Pony V6).
     """
+
+    @property
+    def parameter_schema(self) -> Type[BaseModel]:
+        return ImageParameters
 
     def __init__(self):
         self._pipe: Optional[StableDiffusionXLPipeline] = None
@@ -130,13 +144,17 @@ class ImageGenerator(BaseGenerator):
             output_files_bytes = []
             timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
 
+            # Validate parameters using the schema
+            params = ImageParameters(**request.parameters)
+
             for i in range(request.num_outputs):
                 print(f"\nGenerating image {i+1}/{request.num_outputs}...")
                 
-                width = request.parameters.get("width", 1024)
-                height = request.parameters.get("height", 768)
-                guidance_scale = request.parameters.get("guidance_scale", 7.0)
-                num_inference_steps = request.parameters.get("num_inference_steps", 30)
+                # Use validated parameters
+                width = params.width
+                height = params.height
+                guidance_scale = params.guidance_scale
+                num_inference_steps = params.num_inference_steps
 
                 # Use to_thread for the heavy synchronous pipeline call
                 result = await asyncio.to_thread(
@@ -160,7 +178,7 @@ class ImageGenerator(BaseGenerator):
                 output_files_bytes.append(img_bytes)
 
                 # Check for streaming callback
-                on_image_ready = request.parameters.get("on_image_ready")
+                on_image_ready = params.on_image_ready
                 if on_image_ready:
                     await asyncio.to_thread(on_image_ready, img_bytes, {
                         "positive_prompt": expanded_pos,
