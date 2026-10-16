@@ -10,16 +10,14 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 
 WORKDIR /workspace
 
-# Install all necessary dependencies in a single layer for optimization
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    diffusers \
-    accelerate \
-    transformers \
-    pillow \
-    python-dotenv \
-    fastapi \
-    uvicorn[standard] \
-    pydantic
+# Install uv for faster dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy packaging files first to leverage Docker cache
+COPY pyproject.toml README.md ./
+
+# Install dependencies and the package in editable mode using uv
+# We use --system because we are installing into the container's global Python environment
+RUN uv pip install --system --no-cache -e .
 
 CMD ["/bin/bash"]
