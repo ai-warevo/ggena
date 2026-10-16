@@ -16,6 +16,8 @@ from src.core.types import GenerationRequest, GenerationResponse
 from src.core.utils import discover_and_register_generators
 from src.core.exceptions import GgenaError, ValidationError, GeneratorError, RegistryError
 from src.core.config import ConfigManager
+from src.core.commands import GenerationCommand, CommandContext
+from src.core.executor import CommandExecutor
 
 # Pydantic models for FastAPI request/response validation
 class RequestModel(BaseModel):
@@ -59,6 +61,7 @@ async def lifespan(app: FastAPI):
     # Create a shutdown event to signal all running generators
     shutdown_event = threading.Event()
     app.state.shutdown_event = shutdown_event
+    app.state.executor = CommandExecutor(CommandContext(registry=registry, config=config, shutdown_event=shutdown_event))
 
     # 2. Pre-load models by getting singleton instances and setting shutdown event
     available = registry.list_available()
@@ -123,11 +126,13 @@ async def generate(module: str, request: RequestModel):
 
         print(f"--- [Server] Processing request for '{module}': {request.prompt} ---")
         
-        response = await generator.generate(core_request)
-        if not response.success:
+        command = GenerationCommand(module=module, request=core_request)
+        result = await app.state.executor.execute(command)
+
+        if not result.success:
             # If the generator returned success=False, it might have its own error message
-            raise GeneratorError(response.error_message or "Generation failed.")
-        return response
+            raise GeneratorError(result.error_message or "Generation failed.")
+        return result.result
 
     except RegistryError as e:
         raise HTTPException(status_code=404, detail=str(e))

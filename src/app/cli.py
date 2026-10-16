@@ -6,11 +6,8 @@ import threading
 import signal
 from datetime import datetime
 
-from src.core.registry import GeneratorRegistry
-from src.core.types import GenerationRequest
-from src.core.config import ConfigManager
-from src.core.utils import discover_and_register_generators
-from src.core.exceptions import GgenaError, RegistryError, ValidationError, GeneratorError
+from src.core.commands import GenerationCommand, CommandContext
+from src.core.executor import CommandExecutor
 
 async def main():
     parser = argparse.ArgumentParser(description="AI Generator Orchestrator")
@@ -77,8 +74,6 @@ async def main():
 
         # Setup shutdown event and signal handling
         shutdown_event = threading.Event()
-        if hasattr(generator, "set_shutdown_event"):
-            generator.set_shutdown_event(shutdown_event)
 
         def handle_sigint(sig, frame):
             print("\n[Orchestrator] Interrupt received (CTRL+C). Signaling shutdown...")
@@ -87,12 +82,17 @@ async def main():
         # Register signal handler for SIGINT (CTRL+C)
         signal.signal(signal.SIGINT, handle_sigint)
 
-        # 5. Execute generation
+        # 5. Execute generation via Command Pattern
         print(f"--- [Orchestrator] Dispatching request to '{args.module}' generator ---")
-        response = await generator.generate(request)
+        
+        context = CommandContext(registry=registry, config=config, shutdown_event=shutdown_event)
+        executor = CommandExecutor(context)
+        command = GenerationCommand(module=args.module, request=request)
+        result = await executor.execute(command)
 
         # 6. Handle Response
-        if response.success:
+        if result.success:
+            response = result.result
             print("\n--- [Orchestrator] Generation Successful! ---")
             
             # If user requested output saving
@@ -129,7 +129,7 @@ async def main():
                 print(f"Metadata: {response.metadata}")
         else:
             print("\n--- [Orchestrator] Generation Failed ---")
-            print(f"Error: {response.error_message}")
+            print(f"Error: {result.error_message}")
             sys.exit(1)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
