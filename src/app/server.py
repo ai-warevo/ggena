@@ -286,15 +286,14 @@ async def websocket_generate(websocket: WebSocket, module: str):
                     logger.error(f"--- [WS] Unexpected error in loop: {e} ---")
                     await websocket.send_json({"type": "error", "message": f"Unexpected error: {str(e)}"})
 
-            except WebSocketDisconnect:
-                logger.info(f"--- [WS] Client disconnected from module '{module}' ---")
-                break
-            except Exception as e:
-                logger.error(f"--- [WS] Unexpected error in loop: {e} ---")
-                try:
-                    await websocket.send_json({"type": "error", "message": str(e)})
-                except:
-                    pass
+    except WebSocketDisconnect:
+        logger.info(f"--- [WS] Client disconnected from module '{module}' ---")
+    except Exception as e:
+        logger.error(f"--- [WS] Unexpected error in loop: {e} ---")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except:
+            pass
 
 @app.get("/health")
 async def health_check():
