@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-# Placeholder types to be replaced by actual dataclasses in future tasks
-GenerationRequest = Any
-GenerationResponse = Any
+from src.core.types import GenerationRequest, GenerationResponse
 
 class BaseGenerator(ABC):
     """
