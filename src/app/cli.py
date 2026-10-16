@@ -6,9 +6,9 @@ import threading
 import signal
 from datetime import datetime
 
-from src.core.registry import registry
+from src.core.registry import GeneratorRegistry
 from src.core.types import GenerationRequest
-from src.core.config import config
+from src.core.config import ConfigManager
 from src.core.utils import discover_and_register_generators
 from src.core.exceptions import GgenaError, RegistryError, ValidationError, GeneratorError
 
@@ -26,8 +26,12 @@ async def main():
     
     args = parser.parse_args()
 
+    # 0. Initialize core components
+    config = ConfigManager()
+    registry = GeneratorRegistry()
+
     # 1. Discover generators
-    discover_and_register_generators("src.generators")
+    discover_and_register_generators("src.generators", registry)
 
     if not args.prompt:
         print("Error: Prompt is required.")
@@ -36,7 +40,7 @@ async def main():
 
     # 2. Get generator from registry
     try:
-        generator = registry.get(args.module)
+        generator = registry.get(args.module, config=config, registry=registry)
         if not generator:
             available = registry.list_available()
             error_msg = f"Module '{args.module}' is not registered or not implemented."

@@ -1,20 +1,16 @@
 from typing import Dict, Type, Any, Optional
 from src.generators.base import BaseGenerator
 from src.core.exceptions import RegistryError
+from src.core.config import ConfigManager
 
 class GeneratorRegistry:
     """
     A central registry for all AI generators in the ggena framework.
     Supports dynamic discovery and self-registration of generator implementations.
     """
-    _instance: Optional['GeneratorRegistry'] = None
-    _registry: Dict[str, Type[BaseGenerator]] = {}
-    _instances: Dict[str, BaseGenerator] = {}
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(GeneratorRegistry, cls).__new__(cls)
-        return cls._instance
+    def __init__(self):
+        self._registry: Dict[str, Type[BaseGenerator]] = {}
+        self._instances: Dict[str, BaseGenerator] = {}
 
     def register(self, name: str, generator_class: Type[BaseGenerator]) -> None:
         """
@@ -29,29 +25,33 @@ class GeneratorRegistry:
         
         self._registry[name] = generator_class
 
-    def get(self, name: str) -> Optional[BaseGenerator]:
+    def get(self, name: str, config: Optional[ConfigManager] = None, registry: Optional['GeneratorRegistry'] = None) -> Optional[BaseGenerator]:
         """
         Retrieves a NEW instance of the registered generator.
         Useful for CLI/one-off executions.
         
         Args:
             name (str): The identifier of the generator to retrieve.
+            config (Optional[ConfigManager]): Configuration dependency to inject.
+            registry (Optional[GeneratorRegistry]): Registry dependency to inject.
             
         Returns:
             Optional[BaseGenerator]: A new instance of the generator, or None if not found.
         """
         generator_class = self._registry.get(name)
         if generator_class:
-            return generator_class()
+            return generator_class(config=config, registry=registry)
         return None
 
-    def get_instance(self, name: str) -> Optional[BaseGenerator]:
+    def get_instance(self, name: str, config: Optional[ConfigManager] = None, registry: Optional['GeneratorRegistry'] = None) -> Optional[BaseGenerator]:
         """
         Retrieves a singleton instance of the registered generator.
         Useful for long-running servers to keep models in memory.
         
         Args:
             name (str): The identifier of the generator to retrieve.
+            config (Optional[ConfigManager]): Configuration dependency to inject.
+            registry (Optional[GeneratorRegistry]): Registry dependency to inject.
             
         Returns:
             Optional[BaseGenerator]: The cached instance of the generator, or None if not found.
@@ -59,7 +59,7 @@ class GeneratorRegistry:
         if name in self._instances:
             return self._instances[name]
         
-        generator = self.get(name)
+        generator = self.get(name, config=config, registry=registry)
         if generator:
             self._instances[name] = generator
             return generator
@@ -68,6 +68,3 @@ class GeneratorRegistry:
     def list_available(self) -> list[str]:
         """Returns a list of all registered generator names."""
         return list(self._registry.keys())
-
-# Global instance for easy access and self-registration
-registry = GeneratorRegistry()

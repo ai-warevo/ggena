@@ -85,15 +85,28 @@ class ImageGenerator(BaseGenerator):
     def parameter_schema(self) -> Type[BaseModel]:
         return ImageParameters
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config=None, registry=None):
+        super().__init__(config=config, registry=registry)
         self._pipe: Optional[StableDiffusionXLPipeline] = None
-        self._model_id: str = config.get_str("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
+        # Use injected config if available, otherwise fallback to a default (for backward compatibility during transition)
+        if self._config:
+            self._model_id: str = self._config.get_str("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
+        else:
+            # This part is for backward compatibility if someone still uses the old way
+            import src.core.config as global_config
+            self._model_id: str = global_config.config.get_str("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
 
     def _load_pipeline(self):
         if self._pipe is None:
             print(f"Loading model '{self._model_id}' to GPU...")
-            hf_token = config.get_str("HF_TOKEN")
+            # Use injected config if available, otherwise fallback
+            hf_token = None
+            if self._config:
+                hf_token = self._config.get_str("HF_TOKEN")
+            else:
+                import src.core.config as global_config
+                hf_token = global_config.config.get_str("HF_TOKEN")
+
             self._pipe = StableDiffusionXLPipeline.from_pretrained(
                 self._model_id, 
                 dtype=torch.float16, 

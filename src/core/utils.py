@@ -1,8 +1,8 @@
 import importlib
 import pkgutil
-from src.core.registry import registry
+from src.core.registry import GeneratorRegistry
 
-def discover_and_register_generators(package_name: str):
+def discover_and_register_generators(package_name: str, registry: GeneratorRegistry):
     """
     Dynamically imports all subpackages in the given package to trigger 
     their self-registration in the GeneratorRegistry.

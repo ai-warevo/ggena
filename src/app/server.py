@@ -4,17 +4,18 @@ import base64
 import torch
 import threading
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from typing import Dict, Any, Optional, List
 
-from src.core.registry import registry
+from src.core.registry import GeneratorRegistry
 from src.core.types import GenerationRequest, GenerationResponse
 from src.core.utils import discover_and_register_generators
 from src.core.exceptions import GgenaError, ValidationError, GeneratorError, RegistryError
+from src.core.config import ConfigManager
 
 # Pydantic models for FastAPI request/response validation
 class RequestModel(BaseModel):
@@ -30,23 +31,41 @@ class ResponseModel(BaseModel):
     metadata: Dict[str, Any] = {}
     error_message: Optional[str] = None
 
+# Dependency Injection providers for FastAPI
+def get_config() -> ConfigManager:
+    return ConfigManager()
+
+def get_registry() -> GeneratorRegistry:
+    # In a real app, we might want to cache this registry instance 
+    # so it's not recreated on every request.
+    # For now, let's use a simple singleton-like approach within the app lifecycle.
+    if not hasattr(app, "_registry"):
+        app._registry = GeneratorRegistry()
+        discover_and_register_generators("src.generators", app._registry)
+    return app._registry
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("--- [Server] Starting up ---")
-    # 1. Discover and register all generators
-    discover_and_register_generators("src.generators")
+    # 1. Initialize core components
+    config = ConfigManager()
+    registry = GeneratorRegistry()
+    discover_and_register_generators("src.generators", registry)
     
+    # Store them in app state for access in routes
+    app.state.config = config
+    app.state.registry = registry
+
     # Create a shutdown event to signal all running generators
     shutdown_event = threading.Event()
+    app.state.shutdown_event = shutdown_event
 
     # 2. Pre-load models by getting singleton instances and setting shutdown event
     available = registry.list_available()
     print(f"--- [Server] Available modules: {available} ---")
     for module in available:
         print(f"--- [Server] Pre-loading model for '{module}'... ---")
-        generator = registry.get_instance(module)
-        if hasattr(generator, "set_shutdown_event"):
-            generator.set_shutdown_event(shutdown_event)
+        generator = registry.get_instance(module, config=config, registry=registry)
     
     # RTX 4080 Optimizations
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -83,10 +102,9 @@ async def generate(module: str, request: RequestModel):
     """
     Endpoint to trigger generation for a specific module via HTTP POST.
     """
+    registry = app.state.registry
     try:
-        generator = registry.get_instance(module)
-        if not generator:
-            raise RegistryError(f"Module '{module}' not found.")
+        generator = registry.get_instance(module, config=app.state.config, registry=app.state.registry)
 
         # Validate parameters against the generator's schema
         try:
@@ -133,6 +151,9 @@ async def websocket_generate(websocket: WebSocket, module: str):
     loop = asyncio.get_running_loop()
 
     try:
+        registry = app.state.registry
+        shutdown_event = app.state.shutdown_event
+
         while True:
             # Wait for a message from the client
             data = await websocket.receive_json()
@@ -141,7 +162,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
             if data.get("type") == "generate":
                 print(f"--- [WS] 'generate' type detected for module '{module}' ---")
                 try:
-                    generator = registry.get_instance(module)
+                    generator = registry.get_instance(module, config=app.state.config, registry=app.state.registry)
                     if not generator:
                         raise RegistryError(f"Module '{module}' not found.")
 
@@ -255,14 +276,15 @@ async def websocket_generate(websocket: WebSocket, module: str):
                     print(f"--- [WS] Unexpected error in loop: {e} ---")
                     await websocket.send_json({"type": "error", "message": f"Unexpected error: {str(e)}"})
 
-    except WebSocketDisconnect:
-        print(f"--- [WS] Client disconnected from module '{module}' ---")
-    except Exception as e:
-        print(f"--- [WS] Unexpected error in loop: {e} ---")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except:
-            pass
+            except WebSocketDisconnect:
+                print(f"--- [WS] Client disconnected from module '{module}' ---")
+                break
+            except Exception as e:
+                print(f"--- [WS] Unexpected error in loop: {e} ---")
+                try:
+                    await websocket.send_json({"type": "error", "message": str(e)})
+                except:
+                    pass
 
 @app.get("/health")
 async def health_check():

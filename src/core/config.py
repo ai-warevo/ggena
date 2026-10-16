@@ -79,5 +79,4 @@ class ConfigManager:
         val = self._get_raw(key)
         return val if val is not None else default
 
-# Global instance for easy access throughout the application
 config = ConfigManager()
