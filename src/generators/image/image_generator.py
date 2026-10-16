@@ -159,6 +159,13 @@ class ImageGenerator(BaseGenerator):
                 encode_infinite_prompt, self._pipe, expanded_pos, expanded_neg
             )
 
+            # Move embeddings to the same device as the pipeline
+            device = self._pipe.device
+            prompt_embeds = prompt_embeds.to(device)
+            negative_prompt_embeds = negative_prompt_embeds.to(device)
+            pooled_prompt_embeds = pooled_prompt_embeds.to(device)
+            negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.to(device)
+
             # 3. Generate images
             output_files_bytes = []
             timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
@@ -169,21 +176,30 @@ class ImageGenerator(BaseGenerator):
             except PydanticValidationError as e:
                 raise ValidationError(f"Invalid image parameters: {str(e)}", details=e.errors())
 
-            for i in range(request.num_outputs):
+            width = params.width
+            height = params.height
+            guidance_scale = params.guidance_scale
+            num_inference_steps = params.num_inference_steps
+            original_callback = params.callback_on_step_end
+            on_image_ready = params.on_image_ready
+
+            max_batch_size = self._config.get_int("IMAGE_MAX_BATCH_SIZE", 1)
+            for i in range(0, request.num_outputs, max_batch_size):
+                current_batch_size = min(max_batch_size, request.num_outputs - i)
+
                 if self._shutdown_event and self._shutdown_event.is_set():
-                    logger.warning("--- [Image Phase] Shutdown signal detected before starting next image! ---")
+                    logger.warning("--- [Image Phase] Shutdown signal detected before starting next batch! ---")
                     raise GenerationCancelledError("Generation cancelled due to shutdown.")
 
-                logger.info(f"Generating image {i+1}/{request.num_outputs}...")
-                
-                # Use validated parameters
-                width = params.width
-                height = params.height
-                guidance_scale = params.guidance_scale
-                num_inference_steps = params.num_inference_steps
+                logger.info(f"Generating batch of {current_batch_size} images (starting from index {i})...")
+
+                # Prepare batched embeddings
+                batched_prompt_embeds = prompt_embeds.repeat(current_batch_size, 1, 1)
+                batched_negative_prompt_embeds = negative_prompt_embeds.repeat(current_batch_size, 1, 1)
+                batched_pooled_prompt_embeds = pooled_prompt_embeds.repeat(current_batch_size, 1)
+                batched_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.repeat(current_batch_size, 1)
 
                 # Wrap the callback to check for shutdown
-                original_callback = params.callback_on_step_end
                 def wrapped_callback(pipe, step_index, timestep, callback_kwargs):
                     if self._shutdown_event and self._shutdown_event.is_set():
                         logger.warning("--- [Image Phase] Shutdown signal detected in callback! ---")
@@ -195,10 +211,10 @@ class ImageGenerator(BaseGenerator):
                 # Use to_thread for the heavy synchronous pipeline call
                 result = await asyncio.to_thread(
                     lambda: self._pipe(
-                        prompt_embeds=prompt_embeds,
-                        negative_prompt_embeds=negative_prompt_embeds,
-                        pooled_prompt_embeds=pooled_prompt_embeds,
-                        negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+                        prompt_embeds=batched_prompt_embeds,
+                        negative_prompt_embeds=batched_negative_prompt_embeds,
+                        pooled_prompt_embeds=batched_pooled_prompt_embeds,
+                        negative_pooled_prompt_embeds=batched_negative_pooled_prompt_embeds,
                         guidance_scale=guidance_scale, 
                         num_inference_steps=num_inference_steps,
                         width=width,
@@ -206,22 +222,24 @@ class ImageGenerator(BaseGenerator):
                         callback_on_step_end=wrapped_callback
                     )
                 )
-                image = result.images[0]
 
-                # Always get bytes
-                buffer = io.BytesIO()
-                image.save(buffer, format="PNG")
-                img_bytes = buffer.getvalue()
-                output_files_bytes.append(img_bytes)
+                # Process the batch of images
+                for j in range(current_batch_size):
+                    image = result.images[j]
 
-                # Check for streaming callback
-                on_image_ready = params.on_image_ready
-                if on_image_ready:
-                    await asyncio.to_thread(on_image_ready, img_bytes, {
-                        "positive_prompt": expanded_pos,
-                        "negative_prompt": expanded_neg,
-                        "model_id": self._model_id
-                    })
+                    # Always get bytes
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="PNG")
+                    img_bytes = buffer.getvalue()
+                    output_files_bytes.append(img_bytes)
+
+                    # Check for streaming callback
+                    if on_image_ready:
+                        await asyncio.to_thread(on_image_ready, img_bytes, {
+                            "positive_prompt": expanded_pos,
+                            "negative_prompt": expanded_neg,
+                            "model_id": self._model_id
+                        })
 
             logger.info("--- All images generated successfully! ---")
             return GenerationResponse(
