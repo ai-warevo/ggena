@@ -1,108 +1,117 @@
 # Architectural Analysis Report: ggena Framework
 
 ## 1. Executive Summary
+The `ggena` project currently functions as a well-structured prototype that successfully implements a dynamic discovery and registration mechanism for AI generation modalities. It leverages the **Registry** and **Strategy** patterns to decouple the orchestration layer (CLI/Server) from specific generator implementations. While the foundation is solid, transitioning from a "collection of scripts" to a "robust framework" requires addressing type safety, formalizing parameter validation, adopting asynchronous interfaces, and standardizing dependency management.
 
-The current `ggena` project functions as a functional AI generation orchestrator, but its architecture is currently characterized by a **script-based procedural approach**. While effective for the initial implementation of image generation, the design lacks the formal patterns required to scale into a robust, extensible framework capable of supporting dozens of diverse modalities (audio, music, video, etc.) without significant technical debt.
+## 2. Current State Analysis
 
-This report identifies critical architectural flaws and proposes a transition toward a **Plugin-based Strategy & Registry architecture**.
+### 2.1 Architecture Overview
+The current architecture follows a modular approach:
+- **Orchestrator Layer**: `src/app` (CLI and FastAPI server) manages the lifecycle of requests.
+- **Registry Layer**: `src/core/registry.py` acts as a central broker, allowing for dynamic discovery via `pkgutil`.
+- **Strategy Layer**: `src/generators` contains modality-specific implementations that adhere to a common interface defined in `BaseGenerator`.
 
----
+### 2.2 Strengths
+- **Dynamic Discovery**: The use of `discover_and_register_generators` allows new modalities to be added with zero changes to the core orchestration logic, provided they follow the registration convention.
+- **Singleton Management**: The registry's ability to manage both fresh instances and cached singleton instances is critical for high-performance server environments where model loading is expensive.
+- **Standardized Data Transfer**: The use of `GenerationRequest` and `GenerationResponse` dataclasses provides a consistent contract between the orchestrator and generators.
 
-## 2. Current State Analysis ("As-Is")
-
-### 2.1 Identified Design Flaws
-
-| Flaw | Description | Impact |
+### 2.3 Identified Design Flaws & Weaknesses
+| Flaw | Impact | Description |
 | :--- | :--- | :--- |
-| **Tight Coupling** | `src/main.py` explicitly imports functions from `src.generators.image`. | Adding a new modality requires modifying the core orchestrator code, violating the **Open/Closed Principle**. |
-| **Procedural Dispatching** | The orchestrator uses an `if-elif-else` chain to decide which module to run. | As modalities grow, `main.py` becomes a "God Object" that is difficult to maintain and test. |
-| **Lack of Interface Contract** | There is no formal definition (ABC) for what constitutes a "Generator". | Different generators may have inconsistent signatures, making automated orchestration impossible. |
-| **Fragmented Configuration** | Modules directly access `os.getenv`. | Harder to validate configurations, implement defaults centrally, or support multiple configuration profiles. |
-| **Inconsistent Error Handling** | Error handling is implemented locally within each generator function. | The orchestrator cannot provide a unified error reporting or recovery mechanism. |
+| **Weak Type Enforcement** | High | `BaseGenerator` uses `Any` for request/response types, bypassing the benefits of the standardized dataclasses and increasing risk of runtime errors. |
+| **Synchronous Interface** | Medium | The `generate` method is synchronous. While handled by threads in the server, it prevents native async implementations (e.g., for I/O bound generators). |
+| **Loose Parameter Validation** | High | Modality-specific parameters are passed as a raw `Dict[str, Any]`. This lacks schema validation and makes the API prone to user error. |
+| **Global State Dependency** | Medium | Heavy reliance on global singletons (`config`, `registry`) can make unit testing difficult and complicates dependency injection. |
+| **Missing Packaging Standards** | Low | Absence of `pyproject.toml` prevents proper dependency management and standard Python installation/distribution. |
 
-### 2.2 Current Architecture Diagram (Mermaid)
+## 3. Proposed Architecture
 
-```mermaid
-graph TD
-    User[User CLI] --> Orchestrator[src/main.py]
-    Orchestrator -->|Hardcoded Import| ImageGen[src/generators/image/image_generator.py]
-    Orchestrator -->|Hardcoded Import| TextExpander[src/generators/image/text_expander.py]
-    ImageGen -->|Uses| Env[Environment Variables]
-    TextExpander -->|Uses| Env
+### 3.1 Refined Pattern Implementation
+To achieve enterprise-grade robustness, we should evolve the current patterns:
+
+1.  **Async Strategy Pattern**: Update `BaseGenerator` to use `async def generate(...)`. This allows generators to natively await I/O or GPU operations without thread overhead.
+2.  **Command Pattern for Task Execution**: Instead of direct method calls, encapsulate generation tasks into `GenerationCommand` objects. This enables features like task queuing, retries, and audit logging.
+3.  **Factory Pattern for Parameter Models**: Use a Factory to return modality-specific Pydantic models based on the requested module, ensuring strict validation before the request reaches the generator.
+
+### 3.2 Improved Type Safety & Validation
+We will replace the generic `Dict[str, Any]` with **Pydantic-based schemas**. Each generator will define its own `ParameterSchema`.
+
+```python
+class ImageParameters(BaseModel):
+    width: int = Field(1024, ge=256, le=4096)
+    height: int = Field(768, ge=256, le=4096)
+    guidance_scale: float = Field(7.0, ge=1.0, le=20.0)
+
+class ImageGenerator(BaseGenerator):
+    async def generate(self, request: GenerationRequest[ImageParameters]) -> GenerationResponse:
+        # ... implementation ...
 ```
 
----
+### 3.3 Dependency Injection (DI)
+Move away from global singletons towards a DI container or passing dependencies through constructors. This allows for easier mocking during testing and better control over resource lifecycles.
 
-## 3. Proposed Architecture ("To-Be")
+## 4. Architectural Diagrams
 
-### 3.1 Recommended Design Patterns
-
-To achieve scalability and modularity, we will implement the following patterns:
-
-1.  **Strategy Pattern**: Define a strict `BaseGenerator` Abstract Base Class (ABC). Every new modality must implement this interface.
-2.  **Registry Pattern**: A central `GeneratorRegistry` where generators "self-register" upon module import. This allows the orchestrator to discover capabilities dynamically.
-3.  **Factory Pattern**: The Orchestrator will use the Registry to instantiate the correct Strategy at runtime based on user input.
-4.  **Data Transfer Objects (DTOs)**: Use `dataclasses` for standardized `GenerationRequest` and `GenerationResponse` objects to ensure type safety across the pipeline.
-
-### 3.2 Proposed Architecture Diagram (Mermaid)
-
+### 4.1 High-Level Component Interaction
 ```mermaid
 graph TD
-    User[User CLI] --> Orchestrator[Orchestrator Engine]
+    Client[Client: CLI/Web] --> Orchestrator[Orchestrator: App Layer]
     Orchestrator --> Registry[Generator Registry]
-    Registry -.->|Discovers| Impl1[Image Generator Implementation]
-    Registry -.->|Discovers| Impl2[Audio Generator Implementation]
-    Registry -.->|Discovers| Impl3[Video Generator Implementation]
+    Registry --> Generator[Specific Generator Strategy]
+    Generator --> Model[AI Model / GPU]
     
-    Orchestrator -->|Instantiates via Factory| Impl1
-    Orchestrator -->|Instantiates via Factory| Impl2
-    
-    subgraph "Standardized Interface (ABC)"
-        Impl1 -.-> Base[BaseGenerator]
-        Impl2 -.-> Base
-        Impl3 -.-> Base
+    subgraph Core Framework
+        Registry
+        Config[Config Manager]
+        Types[Standardized Types]
     end
 
-    subgraph "Shared Services"
-        Config[Central Config Manager]
-        Logger[Unified Logger]
+    subgraph Modality Modules
+        Generator
+        ImageGen[Image Generator]
+        AudioGen[Audio Generator]
     end
-
-    Impl1 --> Config
-    Impl2 --> Config
-    Impl3 --> Config
 ```
 
----
+### 4.2 Request Lifecycle (Proposed)
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant O as Orchestrator
+    participant F as Parameter Factory
+    participant R as Registry
+    participant G as Generator
 
-## 4. Refactoring Roadmap
+    C->>O: POST /generate/{module} (JSON)
+    O->>F: Get Schema for {module}
+    F-->>O: Return Pydantic Model
+    O->>O: Validate Request against Schema
+    O->>R: get_instance({module})
+    R-->>O: Generator Instance
+    O->>G: await generate(validated_request)
+    G-->>O: GenerationResponse
+    O-->>C: JSON Response
+```
 
-### Phase 1: Foundation (The Core)
-- [ ] Create `src/generators/base.py` containing the `BaseGenerator` ABC.
-- [ ] Define `GenerationRequest` and `GenerationResponse` dataclasses in `src/core/types.py`.
-- [ ] Implement a `GeneratorRegistry` class in `src/core/registry.py`.
-- [ ] Create a centralized `ConfigManager` to replace direct `os.getenv` calls.
+## 5. Concrete Refactoring Roadmap
 
-### Phase 2: Implementation Alignment
-- [ ] Refactor `src/generators/image/image_generator.py` to inherit from `BaseGenerator`.
-- [ ] Update `text_expander.py` to be a component used by the Image Generator strategy.
-- [ ] Ensure all generators return standardized `GenerationResponse` objects.
+### Phase 1: Foundation (Immediate)
+- [ ] **Standardize Types**: Update `BaseGenerator` to use actual `GenerationRequest` and `GenerationResponse` from `src.core.types`.
+- [ ] **Modern Packaging**: Add `pyproject.toml` and migrate dependencies from manual management to a standard tool (e.g., `poetry` or `pip`).
+- [ ] **Async Transition**: Convert `BaseGenerator.generate` to an `async` method.
 
-### Phase 3: Orchestrator Decoupling
-- [ ] Rewrite `src/main.py` to use the `GeneratorRegistry`.
-- [ ] Remove all direct imports of specific generator modules from `main.py`.
-- [ ] Implement a generic CLI that handles any registered modality.
+### Phase 2: Robustness (Short-term)
+- [ ] **Pydantic Integration**: Implement modality-specific parameter validation using Pydantic models.
+- [ ] **Enhanced Error Handling**: Define a custom exception hierarchy (`GgenaError` -> `GeneratorError`, `ValidationError`, etc.).
+- [ ] **Dependency Injection**: Refactor `ConfigManager` and `Registry` to support injection into generator constructors.
 
-### Phase 4: Expansion & Hardening
-- [ ] Add new modalities (Audio, Video) by simply adding new files in `src/generators/` that register themselves.
-- [ ] Implement global error handling and logging within the Orchestrator.
+### Phase 3: Scalability (Long-term)
+- [ ] **Command Pattern**: Implement a task queue/command system for handling long-running or batch generation jobs.
+- [ ] **Plugin Architecture**: Formalize the discovery mechanism to allow third-party developers to install generators as separate Python packages.
 
----
-
-## 5. Vision for Scale (20+ Models)
-
-When the project reaches a scale of 20+ models, the architecture will support:
-
-1.  **Plugin Discovery**: The orchestrator can scan the `src/generators/` directory and automatically load all available modules without any code changes to the core.
-2.  **Heterogeneous Execution**: Different generators can run on different hardware (CPU vs GPU) or even different containers, managed by a unified command interface.
-3.  **Standardized Pipeline**: Every model, regardless of complexity, follows the same `Request -> Process -> Response` lifecycle, making it trivial to add monitoring, telemetry, and caching layers globally.
+## 6. Future Vision: Supporting 20+ Models
+When `ggena` scales to dozens of models, the architecture will behave like a true **Model Hub Orchestrator**:
+- **Zero-Touch Integration**: New models are added by simply dropping a new package into the environment; the orchestrator discovers them automatically via entry points.
+- **Heterogeneous Resource Management**: The registry can intelligently route requests to different worker nodes (e.g., Image on GPU-A, Audio on CPU-B) based on model requirements.
+- **Unified API Surface**: Despite the diversity of underlying models, the client interacts with a single, strictly typed, and highly predictable interface.
