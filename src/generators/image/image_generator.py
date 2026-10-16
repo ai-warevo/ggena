@@ -1,72 +1,183 @@
 import torch
 from diffusers import StableDiffusionXLPipeline
-import sys
-import os
+import io
 from datetime import datetime
-from dotenv import load_dotenv
+from typing import List, Optional
 
-def generate_image(prompt: str, negative_prompt: str, num_images: int = 1, output_path=None):
-    """
-    Initializes SDXL pipeline and generates images.
-    Includes self-healing logic for Pony V6 tags.
-    """
-    prompt = prompt or ""
-    negative_prompt = negative_prompt or ""
+from src.generators.base import BaseGenerator
+from src.core.types import GenerationRequest, GenerationResponse
+from src.core.config import config
+from .text_expander import translate_user_intent_to_tags
 
-    if prompt and "score_9" not in prompt:
-        prompt = f"score_9, score_8_up, score_7_up, {prompt}"
+def encode_infinite_prompt(pipe, prompt_text, negative_prompt_text):
+    """Helper to encode long prompts by chunking them logically."""
+    def get_prompt_chunks(text, tokenizer, max_tokens=75):
+        words = text.split(", ")
+        chunks = []
+        current_chunk = []
+        for word in words:
+            test_str = ", ".join(current_chunk + [word])
+            if len(tokenizer.encode(test_str)) > max_tokens:
+                if current_chunk:
+                    chunks.append(", ".join(current_chunk))
+                    current_chunk = [word]
+                else:
+                    chunks.append(word)
+                    current_chunk = []
+            else:
+                current_chunk.append(word)
+        if current_chunk:
+            chunks.append(", ".join(current_chunk))
+        return chunks if chunks else [""]
+
+    pos_chunks = get_prompt_chunks(prompt_text, pipe.tokenizer)
+    neg_chunks = get_prompt_chunks(negative_prompt_text, pipe.tokenizer)
     
-    if not negative_prompt or "score_4" not in negative_prompt:
-        base_neg = "score_4, score_5, score_6, " if negative_prompt else "score_4, score_5, score_6, "
-        negative_prompt = f"{base_neg}{negative_prompt.replace(base_neg, '').strip()}"
-        if not negative_prompt.strip():
-             negative_prompt = "score_4, score_5, score_6, low quality, bad anatomy"
-
-    output_dir = os.getenv("OUTPUT_DIR", ".")
-    os.makedirs(output_dir, exist_ok=True)
-
-    print(f"--- [Image Phase] Starting Image Generation (SDXL / Pony V6) ---")
-    print(f"Final Prompt: {prompt}")
-    print(f"Final Negative Prompt: {negative_prompt}")
-    print(f"Number of images: {num_images}")
+    # Pad to equal chunk count
+    max_chunks = max(len(pos_chunks), len(neg_chunks))
+    pos_chunks += [""] * (max_chunks - len(pos_chunks))
+    neg_chunks += [""] * (max_chunks - len(neg_chunks))
     
-    try:
-        model_id = os.getenv("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
-        
-        print(f"Loading model '{model_id}' to GPU...")
-        pipe = StableDiffusionXLPipeline.from_pretrained(
-            model_id, 
-            torch_dtype=torch.float16, 
-            variant="fp16",
-            safety_checker=None,
-            requires_safety_checker=False
+    pos_embeds_all, neg_embeds_all = [], []
+    pooled_pos_all, pooled_neg_all = [], []
+    
+    for p_chunk, n_chunk in zip(pos_chunks, neg_chunks):
+        # Native encode_prompt handles single chunks perfectly
+        p_embeds, n_embeds, p_pool, n_pool = pipe.encode_prompt(
+            prompt=p_chunk,
+            negative_prompt=n_chunk
         )
-        pipe.to("cuda")
-
-        timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
-
-        for i in range(num_images):
-            counter = i + 1
-            filename = f"{timestamp}_{counter}.png"
-            current_output_path = output_path if output_path else os.path.join(output_dir, filename)
-
-            print(f"\nGenerating image {i+1}/{num_images}... (RTX 4080 power activated!)")
-            
-            image = pipe(
-                prompt=prompt, 
-                negative_prompt=negative_prompt,
-                guidance_scale=7.0, 
-                num_inference_steps=30,
-                width=832,
-                height=1216
-            ).images[0]
-
-            print(f"Saving image to: {current_output_path}")
-            image.save(current_output_path)
+        pos_embeds_all.append(p_embeds)
+        neg_embeds_all.append(n_embeds)
+        pooled_pos_all.append(p_pool)
+        pooled_neg_all.append(n_pool)
         
-        print("\n--- All images generated successfully! ---")
+    # Concatenate hidden states along sequence length (dim=1)
+    final_pos_embeds = torch.cat(pos_embeds_all, dim=1)
+    final_neg_embeds = torch.cat(neg_embeds_all, dim=1)
+    
+    # Take the pooled embeddings from the first core chunk
+    final_pooled_pos = pooled_pos_all[0]
+    final_pooled_neg = pooled_neg_all[0]
+    
+    return final_pos_embeds, final_neg_embeds, final_pooled_pos, final_pooled_neg
+
+
+class ImageGenerator(BaseGenerator):
+    """
+    Implementation of the Image Generation strategy using SDXL (Pony V6).
+    """
+
+    def __init__(self):
+        self._pipe: Optional[StableDiffusionXLPipeline] = None
+        self._model_id: str = config.get_str("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
+
+    def _load_pipeline(self):
+        if self._pipe is None:
+            print(f"Loading model '{self._model_id}' to GPU...")
+            hf_token = config.get_str("HF_TOKEN")
+            self._pipe = StableDiffusionXLPipeline.from_pretrained(
+                self._model_id, 
+                dtype=torch.float16, 
+                variant="fp16",
+                safety_checker=None,
+                requires_safety_checker=False,
+                token=hf_token
+            )
+            self._pipe.to("cuda")
+
+    def generate(self, request: GenerationRequest) -> GenerationResponse:
+        """
+        Generates images based on the provided request.
+        Uses text expansion for better prompt quality.
+        Returns image bytes in output_images.
+        """
+        print(f"--- [Image Phase] Starting Image Generation ---")
         
-    except Exception as e:
-        print(f"--- Error ---")
-        print(str(e))
-        sys.exit(1)
+        try:
+            # 1. Determine Prompts (Priority: Request > Text Expander)
+            req_pos = request.positive_prompt
+            req_neg = request.negative_prompt
+
+            if req_pos:
+                expanded_pos = req_pos
+                expanded_neg = req_neg if req_neg else ""
+            elif request.prompt:
+                print(f"--- [Image Phase] Expanding original prompt ---")
+                exp_pos, exp_neg_from_llm = translate_user_intent_to_tags(request.prompt)
+                expanded_pos = exp_pos
+                expanded_neg = req_neg if req_neg else exp_neg_from_llm
+            else:
+                expanded_pos = ""
+                expanded_neg = ""
+
+            print(f"Original Prompt: {request.prompt}")
+            print(f"Expanded Positive Prompt: {expanded_pos}")
+            print(f"Expanded Negative Prompt: {expanded_neg}")
+            print(f"Number of images requested: {request.num_outputs}")
+
+            # 2. Load pipeline if not already loaded
+            self._load_pipeline()
+
+            # 2.5 Encode prompts to handle long prompts (CLIP 77-token limit) via chunking
+            print(f"--- [Image Phase] Encoding prompts ---")
+            prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = encode_infinite_prompt(
+                self._pipe, expanded_pos, expanded_neg
+            )
+
+            # 3. Generate images
+            output_files_bytes = []
+            timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
+
+            for i in range(request.num_outputs):
+                print(f"\nGenerating image {i+1}/{request.num_outputs}...")
+                
+                width = request.parameters.get("width", 1024)
+                height = request.parameters.get("height", 768)
+                guidance_scale = request.parameters.get("guidance_scale", 7.0)
+                num_inference_steps = request.parameters.get("num_inference_steps", 30)
+
+                image = self._pipe(
+                    prompt_embeds=prompt_embeds,
+                    negative_prompt_embeds=negative_prompt_embeds,
+                    pooled_prompt_embeds=pooled_prompt_embeds,
+                    negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+                    guidance_scale=guidance_scale, 
+                    num_inference_steps=num_inference_steps,
+                    width=width,
+                    height=height
+                ).images[0]
+
+                # Always get bytes
+                buffer = io.BytesIO()
+                image.save(buffer, format="PNG")
+                img_bytes = buffer.getvalue()
+                output_files_bytes.append(img_bytes)
+
+                # Check for streaming callback
+                on_image_ready = request.parameters.get("on_image_ready")
+                if on_image_ready:
+                    on_image_ready(img_bytes, {
+                        "positive_prompt": expanded_pos,
+                        "negative_prompt": expanded_neg,
+                        "model_id": self._model_id
+                    })
+
+            print("\n--- All images generated successfully! ---")
+            return GenerationResponse(
+                success=True, 
+                output_files_bytes=output_files_bytes,
+                metadata={
+                    "model_id": self._model_id,
+                    "positive_prompt": expanded_pos,
+                    "negative_prompt": expanded_neg
+                }
+            )
+
+        except Exception as e:
+            print(f"--- Error during image generation ---")
+            print(str(e))
+            return GenerationResponse(
+                success=False, 
+                error_message=str(e)
+            )

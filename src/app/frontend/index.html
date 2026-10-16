@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GGena</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Left Panel: Settings -->
+        <aside class="settings-panel">
+            <h1>Generator</h1>
+            
+            <div class="status-badge" id="connection-status">
+                <span class="dot"></span>
+                <span class="text">Connecting...</span>
+            </div >
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-btn active" data-mode="ez">EZ Mode</button>
+                <button class="tab-btn" data-mode="advanced">Advanced</button>
+            </div >
+
+            <!-- EZ Mode Container -->
+            <div id="ez-mode-container" class="mode-container">
+                <div class="input-group">
+                    <label for="prompt">Prompt (Intent)</label>
+                    <textarea id="prompt" placeholder="Describe what you want to see in natural language..."></textarea>
+                </div >
+            </div >
+
+            <!-- Advanced Mode Container -->
+            <div id="advanced-mode-container" class="mode-container" style="display: none;">
+                <div class="input-group">
+                    <label for="positive_prompt">Positive Tags</label>
+                    <textarea id="positive_prompt" placeholder="e.g. 1girl, solo, masterpiece..."></textarea>
+                </div >
+                <div class="input-group">
+                    <label for="negative_prompt">Negative Tags</label>
+                    <textarea id="negative_prompt" placeholder="e.g. low quality, blurry..."></textarea>
+                </div >
+            </div >
+
+            <div class="control-row">
+                <div class="control-item">
+                    <label for="steps">Steps (<span id="steps-val">30</span>)</label>
+                    <input type="range" id="steps" min="10" max="50" value="30">
+                </div >
+                <div class="control-item">
+                    <label for="cfg_scale">CFG Scale (<span id="cfg-val">7.0</span>)</label>
+                    <input type="range" id="cfg_scale" min="1" max="15" step="0.5" value="7.0">
+                </div >
+            </div >
+
+            <div class="input-group">
+                <label for="resolution">Resolution</label>
+                <select id="resolution">
+                    <option value="832x1216">832 x 1216 (Portrait)</option>
+                    <option value="1216x832">1216 x 832 (Landscape)</option>
+                    <option value="1024x1024" selected>1024 x 1024 (Square)</option>
+                </select>
+            </div >
+
+            <div class="input-group">
+                <label for="num_outputs">Number of Images</label>
+                <input type="number" id="num_outputs" min="1" max="100" value="2">
+            </div >
+
+            <button id="generate-btn" class="primary-btn">Generate</button>
+        </aside>
+
+        <!-- Right Panel: Preview -->
+        <main class="preview-panel">
+            <div class="progress-container" id="progress-container" style="display: none;">
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div >
+                <div class="status-text" id="status-text">Preparing...</div>
+            </div >
+
+            <div class="image-display">
+                <div id="placeholder" class="placeholder">
+                    <span>Your masterpiece will appear here</span>
+                </div>
+                <div id="image-wrapper" style="display: none; position: relative;">
+                    <button id="prev-btn" class="nav-btn">&lt;</button>
+                    <img id="result-image" src="" alt="Generated Image">
+                    <button id="next-btn" class="nav-btn">&gt;</button>
+                </div>
+            </div>
+
+            <div id="action-area" style="display: none;">
+                <button id="save-btn" class="secondary-btn">💾 Сохранить на диск</button>
+            </div >
+        </main>
+    </div >
+    <script src="/static/script.js"></script>
+</body>
+</html>

@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile
     image: ggena-ai
     container_name: ggena_container
+    ports:
+      - "8000:8000"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     deploy:
       resources:
         reservations:
