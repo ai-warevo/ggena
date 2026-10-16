@@ -37,19 +37,6 @@ class ResponseModel(BaseModel):
     metadata: Dict[str, Any] = {}
     error_message: Optional[str] = None
 
-# Dependency Injection providers for FastAPI
-def get_config() -> ConfigManager:
-    return ConfigManager()
-
-def get_registry() -> GeneratorRegistry:
-    # In a real app, we might want to cache this registry instance 
-    # so it's not recreated on every request.
-    # For now, let's use a simple singleton-like approach within the app lifecycle.
-    if not hasattr(app, "_registry"):
-        app._registry = GeneratorRegistry()
-        discover_and_register_generators("src.generators", app._registry)
-    return app._registry
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -73,7 +60,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"--- [Server] Available modules: {available} ---")
     for module in available:
         logger.info(f"--- [Server] Pre-loading model for '{module}'... ---")
-        generator = registry.get_instance(module, config=config, registry=registry)
+        generator = registry.get_instance(module, config=config)
     
     # RTX 4080 Optimizations
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -112,7 +99,7 @@ async def generate(module: str, request: RequestModel):
     """
     registry = app.state.registry
     try:
-        generator = registry.get_instance(module, config=app.state.config, registry=app.state.registry)
+        generator = registry.get_instance(module, config=app.state.config)
 
         # Validate parameters against the generator's schema
         try:
@@ -172,7 +159,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
             if data.get("type") == "generate":
                 logger.info(f"--- [WS] 'generate' type detected for module '{module}' ---")
                 try:
-                    generator = registry.get_instance(module, config=app.state.config, registry=app.state.registry)
+                    generator = registry.get_instance(module, config=app.state.config)
                     if not generator:
                         raise RegistryError(f"Module '{module}' not found.")
 

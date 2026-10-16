@@ -63,7 +63,7 @@ class GenerationCommand(BaseCommand):
             # and to match server behavior, we use get_instance. 
             # In CLI, the registry is fresh anyway.
             generator = context.registry.get_instance(
-                self.module, config=context.config, registry=context.registry
+                self.module, config=context.config
             )
             if not generator:
                 return CommandResult(
