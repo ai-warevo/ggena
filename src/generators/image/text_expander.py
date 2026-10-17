@@ -4,13 +4,44 @@ import json
 import re
 import logging
 import asyncio
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 from dotenv import load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from src.core.config import config
 from src.core.resource_manager import ManagedResource
 
 logger = logging.getLogger(__name__)
+
+
+def extract_json_from_text(text: str) -> Dict[str, Any]:
+    """
+    Robustly extracts a JSON object from text that might contain markdown or other noise.
+    Falls back to regex extraction if JSON parsing fails.
+    """
+    # 1. Try to find JSON block
+    json_start = text.find('{')
+    json_end = text.rfind('}')
+    if json_start != -1 and json_end != -1:
+        candidate = text[json_start : json_end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            # If JSON parsing fails, we'll fall back to regex on the original text
+            pass
+
+    # 2. Fallback: Regex extraction
+    pos_match = re.search(r'["\']positive["\']\s*:\s*["\']([^"\']*)', text, re.DOTALL)
+    neg_match = re.search(r'["\']negative["\']\s*:\s*["\']([^"\']*)', text, re.DOTALL)
+    if pos_match:
+        pos_val = pos_match.group(1).strip()
+        neg_val = neg_match.group(1).strip() if neg_match else "score_4, score_5, score_6, low quality, bad anatomy"
+        return {
+            "positive": pos_val,
+            "negative": neg_val
+        }
+
+    raise ValueError("Could not extract JSON or relevant tags from text")
+
 
 class TextExpanderModel(ManagedResource):
     """
@@ -81,21 +112,20 @@ async def get_expander_model(model_id: str, hf_token: Optional[str] = None) -> T
         _instance = TextExpanderModel(model_id, hf_token)
     return _instance
 
-async def translate_user_intent_to_tags(user_input: str, model_id: str, hf_token: Optional[str] = None) -> tuple[str, str]:
-    """
-    Uses a lightweight LLM to expand user natural language into Danbooru-style tags.
-    The model is managed via the singleton instance.
-    """
-    expander = await get_expander_model(model_id, hf_token)
-    # Note: The caller (ResourceManager or ImageGenerator) should ensure load() was called.
-    # But for safety/backward compatibility, we can call it here if not loaded.
-    if expander._model is None:
-        await expander.load()
+async def _generate_in_stream(model: AutoModelForCausalLM, model_inputs: Dict[str, torch.Tensor], **kwargs) -> torch.Tensor:
+    """Helper to generate in a separate CUDA stream."""
+    stream = torch.cuda.Stream()
+    with torch.cuda.stream(stream):
+        return model.generate(**model_inputs, **kwargs)
 
-    model = expander.get_model()
-    tokenizer = expander.get_tokenizer()
 
-    refinement_guidelines = config.get_str("IMAGE_EXTRA_REFINEMENT_RULES", "")
+async def _expand_initial_prompt(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    user_input: str,
+    refinement_guidelines: str,
+) -> Dict[str, Any]:
+    """First pass: Expand user intent into initial tags."""
     system_prompt = f"""You are a specialized assistant that converts natural language descriptions (English or Russian) into structured Danbooru-style tags for image generation using Pony Diffusion V6 XL.
 
 Your output must be a valid JSON object with exactly two keys: 'positive' and 'negative'. Do not include any markdown wrapper, explanation, or conversational text.
@@ -118,8 +148,7 @@ Rules:
 Strict Output Rule: Your response must be ONE SINGLE valid JSON object. Never close the bracket before the negative key. Never put a comma between separate bracket pairs.
 
 Example Input: 'лара крофт в шортах'
-Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brown shorts, thigh holsters, photorealistic, highly detailed skin texture, 8k, masterpiece", "negative": "score_4, score_5, score_6, ugly, deformed, blurry, low quality, bad anatomy, bad hands"}}"""
-
+Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brown shorts, thigh holsters, photorealistic, highly detailed skin texture, 8k, masterpiece", "negative": "score_4, score_5, score_6, ugly, deformed, blurry, low quality, bad anatomy"}}"""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -128,13 +157,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
 
     text = await asyncio.to_thread(tokenizer.apply_chat_template, messages, tokenize=False, add_generation_prompt=True)
     model_inputs = await asyncio.to_thread(tokenizer, [text], return_tensors="pt")
-    # Move to cuda if not already there (though tokenizer might have done it or it's on CPU)
     model_inputs = {k: v.to("cuda") for k, v in model_inputs.items()}
-
-    def _generate_in_stream(model, model_inputs, **kwargs):
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
-            return model.generate(**model_inputs, **kwargs)
 
     logger.info(f"Expanding prompt: '{user_input}'")
     generated_ids = await asyncio.to_thread(
@@ -147,61 +170,65 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
     response = response[0].strip()
     logger.debug(f"--- [Text Phase] Response: {response}")
 
-    # Robustly extract JSON content if it's wrapped in markdown or has surrounding text
-    json_start = response.find('{')
-    json_end = response.rfind('}')
-    if json_start != -1 and json_end != -1:
-        response = response[json_start : json_end + 1]
+    return extract_json_from_text(response)
 
-    try:
-        data = json.loads(response)
-    except json.JSONDecodeError:
-        # Fallback: try to extract positive and negative tags using regex if JSON is malformed or truncated
-        pos_match = re.search(r'["\']positive["\']\s*:\s*["\']([^"\']*)', response, re.DOTALL)
-        neg_match = re.search(r'["\']negative["\']\s*:\s*["\']([^"\']*)', response, re.DOTALL)
-        if pos_match:
-            pos_val = pos_match.group(1).strip()
-            neg_val = neg_match.group(1).strip() if neg_match else "score_4, score_5, score_6, low quality, bad anatomy"
-            data = {
-                "positive": pos_val,
-                "negative": neg_val
-            }
-        else:
-            raise
-    
-    # --- [Text Phase] Second Pass: Refinement of Positive Prompt ---
+
+async def _refine_prompt(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    user_input: str,
+    refinement_guidelines: str,
+    initial_positive: str,
+) -> str:
+    """Second pass: Refine the positive prompt for consistency and deduplication."""
+    refinement_messages = [
+        {"role": "system", "content": "You are a Token Deduplication and Consistency layer. Your function is to perform a single-pass validation on a provided token stream to ensure structural integrity, remove redundant entries, and resolve logical contradictions within the sequence. You must maintain strict adherence to existing token values."},
+        {"role": "user", "content": f"Input Data:\nOriginal Intent: {user_input}\nCritical Refinement Rules: {refinement_guidelines}\nCurrent Token Stream: {initial_positive}\n\nTask:\n1. Deduplicate tokens in the Current Token Stream.\n2. Resolve logical contradictions (e.g., conflicting camera angles).\n3. MANDATORY PRESERVATION: You are strictly forbidden from modifying, deleting, or altering any tokens that match the 'Original Intent' or appear within the 'Critical Refinement Rules'. All production-critical keywords must be preserved verbatim.\n4. FORMATTING: Maintain standard comma-and-space delimiter formatting (', '). Do not alter casing, do not replace spaces with underscores, and do not append additional metadata.\n\nOutput ONLY the refined token stream."}
+    ]
+
+    refinement_text = await asyncio.to_thread(tokenizer.apply_chat_template, refinement_messages, tokenize=False, add_generation_prompt=True)
+    model_inputs_refine = await asyncio.to_thread(tokenizer, [refinement_text], return_tensors="pt")
+    model_inputs_refine = {k: v.to("cuda") for k, v in model_inputs_refine.items()}
+
+    logger.info("--- [Text Phase] Refining positive prompt...")
+    generated_ids_refine = await asyncio.to_thread(
+        _generate_in_stream, model, model_inputs_refine, max_new_tokens=128, do_sample=False, temperature=0.1
+    )
+    response_ids_refine = [
+        output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs_refine["input_ids"], generated_ids_refine)
+    ]
+    refined_pos = await asyncio.to_thread(tokenizer.batch_decode, response_ids_refine, skip_special_tokens=True)
+    refined_pos = refined_pos[0].strip()
+    logger.info(f"--- [Text Phase] Refined Positive: {refined_pos}")
+
+    # Ensure quality starters are present in the refined positive prompt
+    quality_starters = "score_9, score_8_up, score_7_up,"
+    if "score_9" not in refined_pos:
+        refined_pos = f"{quality_starters} {refined_pos}"
+
+    return refined_pos
+
+
+async def translate_user_intent_to_tags(user_input: str, model_id: str, hf_token: Optional[str] = None) -> tuple[str, str]:
+    """
+    Uses a lightweight LLM to expand user natural language into Danbooru-style tags.
+    The model is managed via the singleton instance.
+    """
+    expander = await get_expander_model(model_id, hf_token)
+    if expander._model is None:
+        await expander.load()
+
+    model = expander.get_model()
+    tokenizer = expander.get_tokenizer()
+    refinement_guidelines = config.get_str("IMAGE_EXTRA_REFINEMENT_RULES", "")
+
+    # Pass 1: Expansion
+    data = await _expand_initial_prompt(model, tokenizer, user_input, refinement_guidelines)
+
+    # Pass 2: Refinement
     try:
         logger.info(f"--- [Text Phase] Initial Positive: {data['positive']}")
-        refinement_messages = [
-            {"role": "system", "content": "You are a Token Deduplication and Consistency layer. Your function is to perform a single-pass validation on a provided token stream to ensure structural integrity, remove redundant entries, and resolve logical contradictions within the sequence. You must maintain strict adherence to existing token values."},
-            {"role": "user", "content": f"Input Data:\nOriginal Intent: {user_input}\nCritical Refinement Rules: {refinement_guidelines}\nCurrent Token Stream: {data['positive']}\n\nTask:\n1. Deduplicate tokens in the Current Token Stream.\n2. Resolve logical contradictions (e.g., conflicting camera angles).\n3. MANDATORY PRESERVATION: You are strictly forbidden from modifying, deleting, or altering any tokens that match the 'Original Intent' or appear within the 'Critical Refinement Rules'. All production-critical keywords must be preserved verbatim.\n4. FORMATTING: Maintain standard comma-and-space delimiter formatting (', '). Do not alter casing, do not replace spaces with underscores, and do not append additional metadata.\n\nOutput ONLY the refined token stream."}
-        ]
-
-        refinement_text = await asyncio.to_thread(tokenizer.apply_chat_template, refinement_messages, tokenize=False, add_generation_prompt=True)
-        model_inputs_refine = await asyncio.to_thread(tokenizer, [refinement_text], return_tensors="pt")
-        model_inputs_refine = {k: v.to("cuda") for k, v in model_inputs_refine.items()}
-
-        def _generate_in_stream(model, model_inputs, **kwargs):
-            stream = torch.cuda.Stream()
-            with torch.cuda.stream(stream):
-                return model.generate(**model_inputs, **kwargs)
-
-        logger.info("--- [Text Phase] Refining positive prompt...")
-        generated_ids_refine = await asyncio.to_thread(
-            _generate_in_stream, model, model_inputs_refine, max_new_tokens=128, do_sample=False, temperature=0.1
-        )
-        response_ids_refine = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs_refine["input_ids"], generated_ids_refine)
-        ]
-        refined_pos = await asyncio.to_thread(tokenizer.batch_decode, response_ids_refine, skip_special_tokens=True)
-        refined_pos = refined_pos[0].strip()
-        logger.info(f"--- [Text Phase] Refined Positive: {refined_pos}")
-
-        # Ensure quality starters are present in the refined positive prompt
-        quality_starters = "score_9, score_8_up, score_7_up,"
-        if "score_9" not in refined_pos:
-            refined_pos = f"{quality_starters} {refined_pos}"
-        
+        refined_pos = await _refine_prompt(model, tokenizer, user_input, refinement_guidelines, data["positive"])
         data["positive"] = refined_pos
     except Exception as e:
         logger.warning(f"--- [Text Phase] Refinement failed, using initial tags: {e} ---")
