@@ -4,18 +4,15 @@ export
 PROMPT ?= $(DEFAULT_PROMPT)
 IMAGE_GEN_COUNT ?= $(IMAGE_GEN_COUNT)
 
-# Default track is local for development convenience
 TRACK ?= local
 COMPOSE_FILE := docker-compose.$(TRACK).yml
 
-.PHONY: help up exec gen_image stop logs server dev prod dev-up prod-up
+.PHONY: help up exec gen_image stop logs server dev prod dev-up prod-up lint test setup clean dcu
 
 help:
 	@echo "Usage:"
 	@echo "  make dev             - Start local development (dev track)"
 	@echo "  make prod            - Start production (prod track)"
-	@echo "  make dev-<cmd>       - Run <cmd> in dev track (e.g., make dev-exec)"
-	@echo "  make prod-<cmd>      - Run <cmd> in prod track (e.g., make prod-gen_image)"
 	@echo ""
 	@echo "Available commands:"
 	@echo "  up                   - Build and start containers"
@@ -24,23 +21,26 @@ help:
 	@echo "  server               - Start API server (and stop on exit)"
 	@echo "  stop                 - Stop containers"
 	@echo "  logs                 - View logs"
+	@echo "  lint                 - Run Ruff linter"
+	@echo "  test                 - Run Pytest in container"
+	@echo "  setup                - Install dependencies locally"
+	@echo "  clean                - Remove build artifacts and caches"
+	@echo "  dcu                  - Docker Compose Up (alias for up)"
 
-# Pattern rules for tracks: maps dev-<cmd> -> <cmd> with TRACK=local
+# Pattern rules for tracks
 dev-%:
 	$(MAKE) $(subst dev-,,%) TRACK=local
 
-# Pattern rules for tracks: maps prod-<cmd> -> <cmd> with TRACK=prod
 prod-%:
 	$(MAKE) $(subst prod-,,%) TRACK=prod
 
-# Shortcuts for the track names themselves
 dev:
 	$(MAKE) dev-up
 
 prod:
 	$(MAKE) prod-up
 
-# Core commands (using $(COMPOSE_FILE))
+# Core commands
 up:
 	docker compose -f $(COMPOSE_FILE) up -d --build
 
@@ -58,3 +58,19 @@ stop:
 
 logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
+
+# New Automation Commands
+lint:
+	docker compose -f $(COMPOSE_FILE) exec ai-app ruff check .
+
+test:
+	docker compose -f $(COMPOSE_FILE) exec ai-app pytest tests/
+
+setup:
+	pip install uv && uv pip install -e .
+
+clean:
+	rm -rf __pycache__ .pytest_cache .mypy_cache .ruff_cache
+	find . -type d -name "__pycache__" -exec rm -rf {} +
+
+dcu: up
