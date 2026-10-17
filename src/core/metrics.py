@@ -1,5 +1,4 @@
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
-from fastapi import Response
+from prometheus_client import Counter, Histogram, Gauge
 
 # Metrics definitions
 REQUEST_LATENCY = Histogram(
@@ -18,7 +17,3 @@ ACTIVE_GENERATIONS = Gauge(
     "ggena_active_generations",
     "Gauge of currently running tasks."
 )
-
-def metrics_endpoint() -> Response:
-    """Returns the Prometheus metrics as a FastAPI Response."""
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

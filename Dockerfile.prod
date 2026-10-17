@@ -45,4 +45,4 @@ RUN chown -R ggena_user:ggena_group /workspace
 
 USER ggena_user
 
-CMD ["python3", "-m", "src.app.server"]
+CMD ["python3", "-m", "src.app.server.main"]
