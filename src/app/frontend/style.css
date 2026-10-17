@@ -71,6 +71,17 @@ body {
     background-color: var(--success-color);
 }
 
+.status-badge .dot.connecting {
+    background-color: #eab308; /* Yellow for connecting */
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.5); opacity: 0.5; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
 /* Inputs */
 .input-group {
     display: flex;
@@ -190,6 +201,16 @@ button {
     transition: width 0.2s ease;
 }
 
+.progress-bar.active {
+    animation: progressPulse 2s infinite ease-in-out;
+}
+
+@keyframes progressPulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+}
+
 .status-text {
     font-size: 0.85rem;
     text-align: center;
@@ -293,6 +314,45 @@ button {
     gap: 20px;
 }
 
+/* Toast Notifications */
+#toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.toast {
+    min-width: 250px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.3s ease-out forwards;
+}
+
+.toast.success { background-color: var(--success-color); }
+.toast.error { background-color: var(--error-color); }
+.toast.info { background-color: var(--accent-color); }
+
+.toast.fade-out {
+    animation: fadeOut 0.5s ease-in forwards;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(120%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
 
 button:focus-visible,
 input:focus-visible,

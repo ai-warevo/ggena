@@ -61,6 +61,35 @@ cfgScaleInput.addEventListener('input', () => {
     document.getElementById('cfg-val').textContent = cfgScaleInput.value;
 });
 
+/**
+ * Toast Notification System
+ */
+function showToast(message, type = 'info') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+
+    container.appendChild(toast);
+
+    // Remove after animation
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        toast.addEventListener('animationend', () => {
+            toast.remove();
+            if (container.childNodes.length === 0) {
+                container.remove();
+            }
+        });
+    }, 3000);
+}
+
 function updateConnectionStatus(status) {
     console.log(`[Frontend] Connection status changed to: ${status}`);
     if (status === 'connected') {
@@ -95,6 +124,7 @@ function connect() {
         if (data.type === 'progress') {
             console.log(`[Frontend] Progress update: ${data.step}/${data.total_steps}`);
             progressContainer.style.display = 'block';
+            progressBar.classList.add('active');
             const percent = Math.round((data.step / data.total_steps) * 100);
             progressBar.style.width = `${percent}%`;
             progressBar.setAttribute('aria-valuenow', percent);
@@ -122,6 +152,7 @@ function connect() {
                 placeholder.style.display = 'none';
                 actionArea.style.display = 'block';
                 progressContainer.style.display = 'none';
+                progressBar.classList.remove('active');
                 generateBtn.disabled = false;
 
                 if (data.positive_prompt) {
@@ -132,6 +163,7 @@ function connect() {
                 }
 
                 resetZoom();
+                showToast('Image generated successfully!', 'success');
             } else if (data.image_base64) {
                 // Fallback for single image without images array
                 resultImage.src = data.image_base64;
@@ -139,12 +171,13 @@ function connect() {
                 placeholder.style.display = 'none';
                 actionArea.style.display = 'block';
                 progressContainer.style.display = 'none';
+                progressBar.classList.remove('active');
                 generateBtn.disabled = false;
                 resetZoom();
             }
         } else if (data.type === 'error') {
             console.error('[Frontend] Error message from server:', data.message);
-            alert(`Error: ${data.message}`);
+            showToast(`Error: ${data.message}`, 'error');
             resetUI();
             generateBtn.disabled = false;
         }
@@ -165,6 +198,7 @@ function connect() {
 function resetUI() {
     console.log('[Frontend] Resetting UI');
     progressContainer.style.display = 'none';
+    progressBar.classList.remove('active');
     progressBar.style.width = '0%';
     imageWrapper.style.display = 'none';
     placeholder.style.display = 'block';
@@ -210,7 +244,7 @@ function generate() {
     console.log('[Frontend] Generate button clicked');
     if (socket.readyState !== WebSocket.OPEN) {
         console.error('[Frontend] Cannot generate: WebSocket is not open. Current state:', socket.readyState);
-        alert('WebSocket is not connected!');
+        showToast('WebSocket is not connected!', 'error');
         return;
     }
 
