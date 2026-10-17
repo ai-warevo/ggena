@@ -48,7 +48,7 @@ exec:
 	docker compose -f $(COMPOSE_FILE) exec ai-app bash
 
 gen_image:
-	docker compose -f $(COMPOSE_FILE) exec ai-app python3 -m src.app.cli image $(PROMPT) --num-outputs $(IMAGE_GEN_COUNT)
+	docker compose -f $(COMPOSE_FILE) exec ai-app python3 -m src.app.cli.main image $(PROMPT) --num-outputs $(IMAGE_GEN_COUNT)
 
 server: up
 	docker compose -f $(COMPOSE_FILE) exec ai-app python3 -m src.app.server && docker compose -f $(COMPOSE_FILE) down

@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ggena-cli = "src.app.cli:main"
+ggena-cli = "src.app.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
