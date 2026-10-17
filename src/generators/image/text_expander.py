@@ -112,7 +112,7 @@ async def get_expander_model(model_id: str, hf_token: Optional[str] = None) -> T
         _instance = TextExpanderModel(model_id, hf_token)
     return _instance
 
-async def _generate_in_stream(model: AutoModelForCausalLM, model_inputs: Dict[str, torch.Tensor], **kwargs) -> torch.Tensor:
+def _generate_in_stream(model: AutoModelForCausalLM, model_inputs: Dict[str, torch.Tensor], **kwargs) -> torch.Tensor:
     """Helper to generate in a separate CUDA stream."""
     stream = torch.cuda.Stream()
     with torch.cuda.stream(stream):
