@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv pip install --system ruff mypy pytest safety
+
+      - name: Lint with Ruff
+        run: ruff check .
+
+      - name: Type Check with Mypy
+        run: mypy src/
+
+      - name: Security Scan (Safety)
+        run: safety check
+
+  test:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker Image (Local)
+        run: docker build -t ggena-test:latest -f Dockerfile.local .
+
+      - name: Run Tests in Container
+        run: docker run --rm ggena-test:latest pytest tests/
+
+  container-scan:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker Image (Local)
+        run: docker build -t ggena-test:latest -f Dockerfile.local .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'ggena-test:latest'
+          format: 'table'
+          exit-code: '1' # Fail the build if vulnerabilities are found
+          severity: 'CRITICAL,HIGH'
