@@ -37,75 +37,74 @@
             <div class="status-badge" id="connection-status">
                 <span class="dot"></span>
                 <span class="text">Connecting...</span>
-            </div >
+            </div>
 
             <!-- Tabs -->
             <div class="tabs">
-                <button class="tab-btn" data-mode="ez">EZ Mode</button>
-                <button class="tab-btn active" data-mode="advanced">Advanced</button>
-            </div >
+                <button class="tab-btn" data-mode="ez" title="Simplified mode: Expand a simple keyword or idea using the text AI model">EZ Mode</button>
+                <button class="tab-btn active" data-mode="advanced" title="Expert mode: Full manual control over raw positive and negative tags">Advanced</button>
+            </div>
 
             <!-- EZ Mode Container -->
             <div id="ez-mode-container" class="mode-container" style="display: none;">
                 <div class="input-group">
                     <label for="prompt">Prompt (Intent)</label>
                     <textarea id="prompt" placeholder="Describe what you want to see in natural language..."></textarea>
-                </div >
-            </div >
+                </div>
+            </div>
 
             <!-- Advanced Mode Container -->
             <div id="advanced-mode-container" class="mode-container">
                 <div class="input-group">
                     <label for="positive_prompt">Positive Tags</label>
                     <textarea id="positive_prompt" placeholder="e.g. 1girl, solo, masterpiece..."></textarea>
-                </div >
+                </div>
                 <div class="input-group">
                     <label for="negative_prompt">Negative Tags</label>
                     <textarea id="negative_prompt" placeholder="e.g. low quality, blurry..."></textarea>
-                </div >
-            </div >
+                </div>
+            </div>
 
             <div class="control-row">
-                <div class="control-item">
+                <div class="control-item" title="Sampling steps: Higher numbers increase image detail but take longer to compute. 30-35 is optimal">
                     <label for="steps">Steps (<span id="steps-val">30</span>)</label>
                     <input type="range" id="steps" min="10" max="50" value="30">
-                </div >
-                <div class="control-item">
+                </div>
+                <div class="control-item" title="Classifier Free Guidance: Controls how strictly the AI adheres to your prompt. 7.0-8.0 is best; higher values distort colors.">
                     <label for="cfg_scale">CFG Scale (<span id="cfg-val">7.0</span>)</label>
                     <input type="range" id="cfg_scale" min="1" max="15" step="0.5" value="7.0">
-                </div >
-            </div >
+                </div>
+            </div>
 
-            <div class="input-group">
+            <div class="input-group" title="Aspect ratio: Native standard resolutions for SDXL. Vertical aspect ratios drastically improve anatomy/poses.">
                 <label for="resolution">Resolution</label>
                 <select id="resolution">
-                    <optgroup label="Вертикальные (Portrait)">
-                        <option value="832x1216">832 x 1216 (2:3)</option>
+                    <optgroup label="Portrait (Vertical)">
+                        <option value="832x1216" selected>832 x 1216 (2:3)</option>
                         <option value="896x1152">896 x 1152 (3:4)</option>
                         <option value="768x1344">768 x 1344 (9:16)</option>
                         <option value="640x1536">640 x 1536 (1:2)</option>
                     </optgroup>
 
-                    <optgroup label="Квадратные (Square)">
-                        <option value="1024x1024" selected>1024 x 1024 (1:1)</option>
+                    <optgroup label="Square">
+                        <option value="1024x1024">1024 x 1024 (1:1)</option>
                     </optgroup>
 
-                    <optgroup label="Горизонтальные (Landscape)">
+                    <optgroup label="Landscape (Horizontal)">
                         <option value="1216x832">1216 x 832 (3:2)</option>
                         <option value="1152x896">1152 x 896 (4:3)</option>
                         <option value="1344x768">1344 x 768 (16:9)</option>
                         <option value="1536x640">1536 x 640 (2:1)</option>
                     </optgroup>
                 </select>
+            </div>
 
-            </div >
-
-            <div class="input-group">
+            <div class="input-group" title="Batch count: Number of alternative image variations to generate for this request.">
                 <label for="num_outputs">Number of Images</label>
                 <input type="number" id="num_outputs" min="1" max="100" value="2">
-            </div >
+            </div>
 
-            <button id="generate-btn" class="primary-btn">Generate</button>
+            <button id="generate-btn" class="primary-btn" title="Send configuration parameters to the local pipeline server and start rendering">Generate</button>
         </aside>
 
         <!-- Right Panel: Preview -->
