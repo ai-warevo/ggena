@@ -1,83 +1,84 @@
 # ggena
 
-**ggena** — a full-stack orchestrator for managing various AI generators (images, audio, video, etc.) through a unified web interface and API.
+**ggena** — это full-stack оркестратор для управления различными ИИ-генераторами (изображения, аудио, видео и т. д.) через единый веб-интерфейс и API.
 
-## 🚀 Architecture
+## 🚀 Архитектура
 
-Ggena combines a powerful Python backend with a responsive web-based frontend to provide both programmatic access and an interactive user experience.
+Ggena сочетает в себе мощный бэкенд на Python и адаптивный веб-фронтенд, обеспечивая как программный доступ к системе, так и удобное интерактивное взаимодействие для пользователя.
 
-### High-Level Overview
-* **Backend**: A FastAPI-powered server that orchestrates AI models, manages execution via a command pattern, and provides real-time updates through WebSockets.
-* **Frontend**: A lightweight, modern web UI that communicates with the backend for seamless generation and progress monitoring.
+### Высокоуровневый обзор
+* **Бэкенд**: Сервер на базе FastAPI, который оркеструет работу ИИ-моделей, управляет их выполнением с помощью паттерна «Команда» (Command pattern) и предоставляет обновления в реальном времени через WebSockets.
+* **Фронтенд**: Легковесный современный веб-интерфейс, который взаимодействует с бэкендом для бесшовной генерации контента и мониторинга прогресса.
 
-### Tech Stack
-| Layer | Technologies |
+### Технологический стек
+
+| Слой | Технологии |
 | :--- | :--- |
-| **Backend** | Python 3.10+, FastAPI, Uvicorn, PyTorch, Diffusers, Pydantic |
-| **Frontend** | HTML5, CSS3, Modern JavaScript (ES6+) |
-| **Communication** | REST API (HTTP POST) & WebSockets (for real-time streaming) |
+| **Бэкенд** | Python 3.10+, FastAPI, Uvicorn, PyTorch, Diffusers, Pydantic |
+| **Фронтенд** | HTML5, CSS3, современный JavaScript (ES6+) |
+| **Взаимодействие** | REST API (HTTP POST) и WebSockets (для стриминга в реальном времени) |
 
-## ✨ Key Features
+## ✨ Ключевые возможности
 
-* **Dynamic Discovery**: New models can be added by creating a new module, which is automatically registered in the system.
-* **Unified Interface**: Standardized requests and responses across all generation types.
-* **Real-time Streaming**: WebSocket support for live progress updates and incremental image delivery during generation.
-* **GPU Optimized**: Built-in support for hardware acceleration (e.g., TF32 for RTX 40-series) and efficient VRAM management.
+* **Динамическое обнаружение (Discovery)**: Новые модели можно добавлять, просто создавая новые модули — они автоматически регистрируются в системе.
+* **Единый интерфейс**: Стандартизированный формат запросов и ответов для всех типов генерации.
+* **Стриминг в реальном времени**: Поддержка WebSockets для живого обновления прогресса и инкрементальной доставки изображений прямо в процессе генерации.
+* **Оптимизация под GPU**: Встроенная поддержка аппаратного ускорения (например, TF32 для видеокарт серии RTX 40) и эффективное управление видеопамятью (VRAM).
 
-## 🛠️ Getting Started
+## 🛠️ С чего начать
 
-### Running with Docker (Recommended)
+### Запуск через Docker (Рекомендуется)
 
-The project is pre-configured to work in a Docker container with NVIDIA GPU support.
+Проект заранее настроен для работы в Docker-контейнере с поддержкой NVIDIA GPU.
 
-1. **Build and start the containers:**
+1. **Собрать и запустить контейнеры:**
    ```bash
    make dcu
    ```
 
-2. **Access the Web UI:**
-   Open your browser and navigate to `http://localhost:8000`.
+2. **Открыть веб-интерфейс:**
+   Перейдите в браузере по адресу `http://localhost:8000`.
 
-3. **Start the API server (and automatically manage containers):**
+3. **Запустить API-сервер (с автоматическим управлением контейнерами):**
    ```bash
    make server
    ```
 
-4. **Generate an image via CLI (inside the container):**
+4. **Сгенерировать изображение через CLI (внутри контейнера):**
    ```bash
    make gen_image PROMPT="a beautiful landscape" IMAGE_GEN_COUNT=1
    ```
 
-5. **Stop containers:**
+5. **Остановить контейнеры:**
    ```bash
    make stop
    ```
 
-### Local Development (Non-Docker)
+### Локальная разработка (Без Docker)
 
-For local development without Docker, the project uses standard Python packaging (`pyproject.toml`).
+Для локальной разработки без использования Docker в проекте применяется стандартная упаковка Python-пакетов (`pyproject.toml`).
 
-1. **Install in editable mode:**
+1. **Установить проект в режиме редактирования (editable mode):**
    ```bash
    pip install -e .
    ```
 
-2. **Start the API & Web Server:**
+2. **Запустить API и веб-сервер:**
    ```bash
    python src/app/server.py
    ```
-   The server will be available at `http://localhost:8000`.
+   Сервер будет доступен по адресу `http://localhost:8000`.
 
-3. **Run via CLI:**
+3. **Запуск через CLI:**
    ```bash
    ggena-cli image "your prompt"
    ```
 
-## 📂 Project Structure
+## 📂 Структура проекта
 
-* `src/core`: Core system logic (registry, configuration, base types).
-* `src/generators`: Implementation of specific generation strategies (image, audio, video, etc.).
-* `src/app`: Orchestrator layer.
-    * `server.py`: FastAPI server entry point.
-    * `cli.py`: Command-line interface implementation.
-    * `frontend/`: Web UI assets (`index.html`, `style.css`, `script.js`).
+* `src/core`: Основная логика системы (реестр моделей, конфигурация, базовые типы данных).
+* `src/generators`: Реализация конкретных стратегий генерации (изображения, аудио, видео и т. д.).
+* `src/app`: Слой оркестрации.
+    * `server.py`: Точка входа для сервера FastAPI.
+    * `cli.py`: Реализация интерфейса командной строки (CLI).
+    * `frontend/`: Ресурсы веб-интерфейса (`index.html`, `style.css`, `script.js`).
