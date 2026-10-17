@@ -16,7 +16,7 @@ from src.core.registry import GeneratorRegistry
 from src.core.types import GenerationRequest, GenerationResponse
 from src.core.utils import discover_and_register_generators
 from src.core.exceptions import GgenaError, ValidationError, GeneratorError, RegistryError
-from src.core.config import ConfigManager
+from src.core.config import ConfigManager, config
 from src.core.commands import GenerationCommand, CommandContext
 from src.core.executor import CommandExecutor
 from src.core.logging_setup import setup_logging
@@ -78,7 +78,7 @@ app = FastAPI(title="ggena API Server", lifespan=lifespan)
 # Enable CORS for frontend development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in config.get_str("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -287,4 +287,5 @@ async def health_check():
     return {"status": "ok"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = config.get_int("PORT", 8000)
+    uvicorn.run(app, host="0.0.0.0", port=port)
