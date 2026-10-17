@@ -1,7 +1,27 @@
-FROM huggingface/transformers-pytorch-gpu
+# --- Stage 1: Builder ---
+FROM huggingface/transformers-pytorch-gpu AS builder
 
-ENV TZ=Asia/Krasnoyarsk
-ENV DEBIAN_FRONTEND=noninteractive  
+ENV TZ=Asia/Krasnoyarsk \
+    DEBIAN_FRONTEND=noninteractive \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /build
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy only dependency files first
+COPY pyproject.toml README.md ./
+
+# Install dependencies into a specific prefix to easily copy them later
+RUN uv pip install --system --no-cache .
+
+# --- Stage 2: Runtime ---
+FROM huggingface/transformers-pytorch-gpu AS runtime
+
+ENV TZ=Asia/Krasnoyarsk \
+    DEBIAN_FRONTEND=noninteractive
 
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone && \
@@ -10,24 +30,19 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 
 WORKDIR /workspace
 
-# Create a non-root user and group
+# Create non-root user
 RUN groupadd -r ggena_group && useradd -r -g ggena_group -m -s /sbin/nologin ggena_user
 
-# Install uv for faster dependency management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Copy installed dependencies from builder
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy packaging files first to leverage Docker cache
-COPY pyproject.toml README.md ./
-
-# Install dependencies and the package (not editable) using uv
-RUN uv pip install --system --no-cache .
-
-# Copy source code and static assets into the image
+# Copy source code
 COPY src/ ./src/
-COPY static/ ./static/
 
-# Ensure the workspace is owned by the non-root user
+# Ensure ownership
 RUN chown -R ggena_user:ggena_group /workspace
 
 USER ggena_user
-CMD ["/bin/bash"]
+
+CMD ["python3", "-m", "src.app.server"]
