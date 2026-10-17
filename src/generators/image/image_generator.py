@@ -118,9 +118,17 @@ class ImageGenerator(BaseGenerator):
                 variant="fp16",
                 safety_checker=None,
                 requires_safety_checker=False,
-                token=hf_token
+                token=hf_token,
+                attn_implementation="flash_attention_2"
             )
             self._pipe.to("cuda")
+
+            logger.info("Compiling UNet and VAE with torch.compile (mode='reduce-overhead')...")
+            try:
+                self._pipe.unet = torch.compile(self._pipe.unet, mode="reduce-overhead")
+                self._pipe.vae = torch.compile(self._pipe.vae, mode="reduce-overhead")
+            except Exception as e:
+                logger.warning(f"torch.compile failed for UNet/VAE: {e}. Proceeding without compilation.")
 
     async def generate(self, request: GenerationRequest) -> GenerationResponse:
         """

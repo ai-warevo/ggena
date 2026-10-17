@@ -13,6 +13,7 @@ dependencies = [
     "diffusers",
     "transformers",
     "accelerate",
+    "bitsandbytes",
     "pillow",
     "fastapi",
     "uvicorn[standard]",

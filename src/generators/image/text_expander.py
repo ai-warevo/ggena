@@ -5,7 +5,7 @@ import re
 import logging
 import asyncio
 from dotenv import load_dotenv
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from src.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -21,12 +21,21 @@ async def translate_user_intent_to_tags(user_input: str) -> tuple[str, str]:
 
     try:
         tokenizer = await asyncio.to_thread(AutoTokenizer.from_pretrained, model_id, token=hf_token)
+        
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+
         model = await asyncio.to_thread(
             AutoModelForCausalLM.from_pretrained,
             model_id, 
-            dtype=torch.float16, 
-            device_map="cuda",
-            token=hf_token
+            quantization_config=bnb_config,
+            device_map="auto",
+            token=hf_token,
+            dtype=torch.float16
         )
 
         refinement_guidelines = config.get_str("IMAGE_EXTRA_REFINEMENT_RULES", "")
@@ -76,7 +85,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
             repetition_penalty=1.35
         )
         response_ids = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs["input_ids"], generated_ids)
         ]
         response = await asyncio.to_thread(tokenizer.batch_decode, response_ids, skip_special_tokens=True)
         response = response[0].strip()
@@ -125,7 +134,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
                 temperature=0.1
             )
             response_ids_refine = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs_refine.input_ids, generated_ids_refine)
+                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs_refine["input_ids"], generated_ids_refine)
             ]
             refined_pos = await asyncio.to_thread(tokenizer.batch_decode, response_ids_refine, skip_special_tokens=True)
             refined_pos = refined_pos[0].strip()
