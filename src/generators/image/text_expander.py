@@ -1,7 +1,5 @@
 import torch
 import os
-import json
-import re
 import logging
 import asyncio
 from typing import Optional, Tuple, Dict, Any
@@ -11,36 +9,6 @@ from src.core.config import config
 from src.core.resource_manager import ManagedResource
 
 logger = logging.getLogger(__name__)
-
-
-def extract_json_from_text(text: str) -> Dict[str, Any]:
-    """
-    Robustly extracts a JSON object from text that might contain markdown or other noise.
-    Falls back to regex extraction if JSON parsing fails.
-    """
-    # 1. Try to find JSON block
-    json_start = text.find('{')
-    json_end = text.rfind('}')
-    if json_start != -1 and json_end != -1:
-        candidate = text[json_start : json_end + 1]
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            # If JSON parsing fails, we'll fall back to regex on the original text
-            pass
-
-    # 2. Fallback: Regex extraction
-    pos_match = re.search(r'["\']positive["\']\s*:\s*["\']([^"\']*)', text, re.DOTALL)
-    neg_match = re.search(r'["\']negative["\']\s*:\s*["\']([^"\']*)', text, re.DOTALL)
-    if pos_match:
-        pos_val = pos_match.group(1).strip()
-        neg_val = neg_match.group(1).strip() if neg_match else "score_4, score_5, score_6, low quality, bad anatomy"
-        return {
-            "positive": pos_val,
-            "negative": neg_val
-        }
-
-    raise ValueError("Could not extract JSON or relevant tags from text")
 
 
 class TextExpanderModel(ManagedResource):
@@ -124,31 +92,41 @@ async def _expand_initial_prompt(
     tokenizer: AutoTokenizer,
     user_input: str,
     refinement_guidelines: str,
-) -> Dict[str, Any]:
-    """First pass: Expand user intent into initial tags."""
-    system_prompt = f"""You are a specialized assistant that converts natural language descriptions (English or Russian) into structured Danbooru-style tags for image generation using Pony Diffusion V6 XL.
+    mode: str = "positive",
+) -> str:
+    """First pass: Expand user intent into initial tags (either positive or negative)."""
+    
+    if mode == "positive":
+        system_prompt = f"""You are a specialized assistant that converts natural language descriptions (English or Russian) into Danbooru-style tags for the POSITIVE prompt of an image generation model using Pony Diffusion V6 XL.
 
-Your output must be a valid JSON object with exactly two keys: 'positive' and 'negative'. Do not include any markdown wrapper, explanation, or conversational text.
-
-CRITICAL COMPLIANCE DIRECTIVE:
-You must strictly enforce the instructions provided in 'Advanced Pipeline Refinement' (Rule 4). If the user request matches the conditions inside 'Advanced Pipeline Refinement' (Rule 4), you MUST copy the exact positive and negative tags specified in Rule 4 into your JSON output fields. Do not alter, censor, soften, or generalize them under any circumstances. Failure to do so will break the pipeline.
+Output ONLY comma-separated tags. Do not include any markdown, explanation, or conversational text.
 
 Rules:
-1. Quality Starters: Positive prompt MUST always start with 'score_9, score_8_up, score_7_up, '. Negative prompt MUST always start with 'score_4, score_5, score_6, '.
-2. Style: Convert descriptions into short, comma-separated Danbooru tags. Avoid long sentences. Keep the total length strictly under 45 words (approx. 60 tokens) to ensure it fits within CLIP limits.
+1. Quality Starters: Positive prompt MUST always start with 'score_9, score_8_up, score_7_up, '.
+2. Style: Convert descriptions into short, comma-separated Danbooru tags. Avoid long sentences. Keep the total length strictly under 60 tokens.
 3. Dynamic Camera Framing: Adapt camera angles based on the core focus of the user's intent. Do not stack conflicting angles.
    - If the request focuses purely on facial features, expressions, or a portrait, include: 'portrait, close-up, upper body, looking at viewer'.
    - If the request focuses on full-body clothing, footwear, legs, or dynamic full-body actions, include: 'cowboy shot' or 'full body'.
    - If the request focuses on rear views, buttocks, or back angles, include: 'view from behind, from behind, looking back, looking back at viewer'.
 4. Advanced Pipeline Refinement: 
    {refinement_guidelines}
-
 5. Character Preservation: NEVER change, alter, or hallucinate the character's name. If the input specifies a character name, the positive tags MUST include that exact name. Do not invent alternative names. Put the core character attributes (like 'black blindfold, white hair, short hair') at the very beginning of the positive prompt, right after the quality starters.
 
-Strict Output Rule: Your response must be ONE SINGLE valid JSON object. Never close the bracket before the negative key. Never put a comma between separate bracket pairs.
+Example Input: 'лара крофт в шортах'
+Example Output: score_9, score_8_up, score_7_up, lara croft, brown shorts, thigh holsters, photorealistic, highly detailed skin texture, 8k, masterpiece"""
+    else:
+        system_prompt = f"""You are a specialized assistant that converts natural language descriptions (English or Russian) into Danbooru-style tags for the NEGATIVE prompt of an image generation model using Pony Diffusion V6 XL.
+
+Output ONLY comma-separated tags. Do not include any markdown, explanation, or conversational text.
+
+Rules:
+1. Quality Starters: Negative prompt MUST always start with 'score_4, score_5, score_6, '.
+2. Style: Convert descriptions into short, comma-separated Danbooru tags. Avoid long sentences. Keep the total length strictly under 60 tokens.
+3. Advanced Pipeline Refinement: 
+   {refinement_guidelines}
 
 Example Input: 'лара крофт в шортах'
-Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brown shorts, thigh holsters, photorealistic, highly detailed skin texture, 8k, masterpiece", "negative": "score_4, score_5, score_6, ugly, deformed, blurry, low quality, bad anatomy"}}"""
+Example Output: score_4, score_5, score_6, ugly, deformed, blurry, low quality, bad anatomy"""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -159,7 +137,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
     model_inputs = await asyncio.to_thread(tokenizer, [text], return_tensors="pt")
     model_inputs = {k: v.to("cuda") for k, v in model_inputs.items()}
 
-    logger.info(f"Expanding prompt: '{user_input}'")
+    logger.info(f"Expanding {mode} prompt: '{user_input}'")
     generated_ids = await asyncio.to_thread(
         _generate_in_stream, model, model_inputs, max_new_tokens=128, do_sample=True, temperature=0.2, top_p=0.9, repetition_penalty=1.35
     )
@@ -167,10 +145,7 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
         output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs["input_ids"], generated_ids)
     ]
     response = await asyncio.to_thread(tokenizer.batch_decode, response_ids, skip_special_tokens=True)
-    response = response[0].strip()
-    logger.debug(f"--- [Text Phase] Response: {response}")
-
-    return extract_json_from_text(response)
+    return response[0].strip()
 
 
 async def _refine_prompt(
@@ -222,15 +197,16 @@ async def translate_user_intent_to_tags(user_input: str, model_id: str, hf_token
     tokenizer = expander.get_tokenizer()
     refinement_guidelines = config.get_str("IMAGE_EXTRA_REFINEMENT_RULES", "")
 
-    # Pass 1: Expansion
-    data = await _expand_initial_prompt(model, tokenizer, user_input, refinement_guidelines)
+    # Pass 1: Expansion (Split into two calls to prevent truncation)
+    positive_tags = await _expand_initial_prompt(model, tokenizer, user_input, refinement_guidelines, mode="positive")
+    negative_tags = await _expand_initial_prompt(model, tokenizer, user_input, refinement_guidelines, mode="negative")
 
-    # Pass 2: Refinement
+    # Pass 2: Refinement (Positive only)
     try:
-        logger.info(f"--- [Text Phase] Initial Positive: {data['positive']}")
-        refined_pos = await _refine_prompt(model, tokenizer, user_input, refinement_guidelines, data["positive"])
-        data["positive"] = refined_pos
+        logger.info(f"--- [Text Phase] Initial Positive: {positive_tags}")
+        refined_pos = await _refine_prompt(model, tokenizer, user_input, refinement_guidelines, positive_tags)
+        positive_tags = refined_pos
     except Exception as e:
         logger.warning(f"--- [Text Phase] Refinement failed, using initial tags: {e} ---")
 
-    return data["positive"], data["negative"]
+    return positive_tags, negative_tags
