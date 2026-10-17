@@ -23,15 +23,20 @@ class CommandResult(Generic[T]):
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+from typing import Any, Dict, Generic, List, Optional, TypeVar, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.core.resource_manager import ResourceManager
+
 @dataclass(frozen=True)
 class CommandContext:
     """
     Context containing dependencies required for command execution.
     """
-
     registry: Any
     config: Any
     shutdown_event: Optional[threading.Event] = None
+    resource_manager: Optional['ResourceManager'] = None
 
 
 class BaseCommand(ABC):
@@ -73,7 +78,7 @@ class GenerationCommand(BaseCommand):
             if context.shutdown_event and hasattr(generator, "set_shutdown_event"):
                 generator.set_shutdown_event(context.shutdown_event)
 
-            response = await generator.generate(self.request)
+            response = await generator.generate(self.request, context=context)
             if not response.success:
                 return CommandResult(
                     success=False, error_message=response.error_message or "Generation failed."

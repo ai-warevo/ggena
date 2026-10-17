@@ -5,13 +5,11 @@ import threading
 from pydantic import BaseModel
 from src.core.types import GenerationRequest, GenerationResponse
 from src.core.config import ConfigManager
+from src.core.commands import CommandContext
 
 class BaseGenerator(ABC):
     """
     Abstract Base Class for all AI generators in the ggena framework.
-
-    All specific generator implementations (e.g., ImageGenerator, AudioGenerator) 
-    must inherit from this class and implement the `generate` method. 
     This ensures a consistent interface across different modalities.
     """
 
@@ -30,14 +28,8 @@ class BaseGenerator(ABC):
         pass
 
     @abstractmethod
-    async def generate(self, request: GenerationRequest) -> GenerationResponse:
+    async def generate(self, request: GenerationRequest, context: Optional[CommandContext] = None) -> GenerationResponse:
         """
         Generates content based on the provided request.
-
-        Args:
-            request (GenerationRequest): The generation request object.
-
-        Returns:
-            GenerationResponse: The generation response object.
         """
         pass

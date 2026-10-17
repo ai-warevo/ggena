@@ -13,7 +13,8 @@ from src.generators.base import BaseGenerator
 from src.core.types import GenerationRequest, GenerationResponse
 from src.core.exceptions import GeneratorError, ValidationError, GenerationCancelledError
 from src.core.config import config
-from .text_expander import translate_user_intent_to_tags
+from .text_expander import translate_user_intent_to_tags, get_expander_model
+from src.core.resource_manager import ManagedResource
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class ImageParameters(BaseModel):
     on_image_ready: Optional[Callable[[bytes, Dict[str, Any]], Any]] = None
     callback_on_step_end: Optional[Callable] = None
 
-class ImageGenerator(BaseGenerator):
+class ImageGenerator(BaseGenerator, ManagedResource):
     """
     Implementation of the Image Generation strategy using SDXL (Pony V6).
     """
@@ -89,6 +90,10 @@ class ImageGenerator(BaseGenerator):
     @property
     def parameter_schema(self) -> Type[BaseModel]:
         return ImageParameters
+
+    @property
+    def name(self) -> str:
+        return "image"
 
     def __init__(self, config=None):
         super().__init__(config=config)
@@ -101,9 +106,9 @@ class ImageGenerator(BaseGenerator):
             import src.core.config as global_config
             self._model_id: str = global_config.config.get_str("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
 
-    def _load_pipeline(self):
+    async def load(self) -> None:
         if self._pipe is None:
-            logger.info(f"Loading model '{self._model_id}' to GPU...")
+            logger.info(f"Loading model '{self._model_id}' to GPU with offloading...")
             # Use injected config if available, otherwise fallback
             hf_token = None
             if self._config:
@@ -121,7 +126,8 @@ class ImageGenerator(BaseGenerator):
                 token=hf_token,
                 attn_implementation="flash_attention_2"
             )
-            self._pipe.to("cuda")
+            # Use accelerate's model offloading to save VRAM
+            self._pipe.enable_model_cpu_offload()
 
             # --- [TensorRT Phase] Check for existing TensorRT engine ---
             trt_engine_path = self._config.get_str("TENSORRT_UNET_PATH")
@@ -137,7 +143,19 @@ class ImageGenerator(BaseGenerator):
             except Exception as e:
                 logger.warning(f"torch.compile failed for UNet/VAE: {e}. Proceeding without compilation.")
 
-    async def generate(self, request: GenerationRequest) -> GenerationResponse:
+    async def unload(self) -> None:
+        if self._pipe is not None:
+            logger.info("Unloading SDXL pipeline...")
+            # Disable offloading before deleting to avoid issues
+            try:
+                self._pipe.disable_model_cpu_offload()
+            except Exception:
+                pass
+            del self._pipe
+            self._pipe = None
+            torch.cuda.empty_cache()
+
+    async def generate(self, request: GenerationRequest, context: Optional[Any] = None) -> GenerationResponse:
         """
         Generates images based on the provided request.
         Uses text expansion for better prompt quality.
@@ -155,7 +173,15 @@ class ImageGenerator(BaseGenerator):
                 expanded_neg = req_neg if req_neg else ""
             elif request.prompt:
                 logger.info("--- [Image Phase] Expanding original prompt ---")
-                exp_pos, exp_neg_from_llm = await translate_user_intent_to_tags(request.prompt)
+                # Use the managed text expander model via context or singleton
+                model_id = self._config.get_str("TEXT_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
+                hf_token = self._config.get_str("HF_TOKEN")
+                
+                if context and context.resource_manager:
+                    # Ensure text expander model is loaded via resource manager
+                    await context.resource_manager.acquire("text_expander_llm")
+                
+                exp_pos, exp_neg_from_llm = await translate_user_intent_to_tags(request.prompt, model_id, hf_token)
                 expanded_pos = exp_pos
                 req_pos = exp_pos
                 expanded_neg = req_neg if req_neg else exp_neg_from_llm
@@ -169,7 +195,8 @@ class ImageGenerator(BaseGenerator):
             logger.info(f"Number of images requested: {request.num_outputs}")
 
             # 2. Load pipeline if not already loaded
-            await asyncio.to_thread(self._load_pipeline)
+            if self._pipe is None:
+                await self.load()
 
             # --- [LoRA Phase] Dynamic LoRA loading ---
             lora_pattern = r'<lora:(.*?):([\d\.]+)>'
@@ -195,7 +222,7 @@ class ImageGenerator(BaseGenerator):
                 encode_infinite_prompt, self._pipe, expanded_pos, expanded_neg
             )
 
-            # Move embeddings to the same device as the pipeline
+            # Move embeddings to the same device as the pipeline (which might be CPU due to offloading!)
             device = self._pipe.device
             prompt_embeds = prompt_embeds.to(device)
             negative_prompt_embeds = negative_prompt_embeds.to(device)
@@ -246,19 +273,17 @@ class ImageGenerator(BaseGenerator):
 
                 # Use to_thread with a custom function that uses a CUDA stream
                 def _run_inference_in_stream():
-                    stream = torch.cuda.Stream()
-                    with torch.cuda.stream(stream):
-                        return self._pipe(
-                            prompt_embeds=batched_prompt_embeds,
-                            negative_prompt_embeds=batched_negative_prompt_embeds,
-                            pooled_prompt_embeds=batched_pooled_prompt_embeds,
-                            negative_pooled_prompt_embeds=batched_negative_pooled_prompt_embeds,
-                            guidance_scale=guidance_scale, 
-                            num_inference_steps=num_inference_steps,
-                            width=width,
-                            height=height,
-                            callback_on_step_end=wrapped_callback
-                        )
+                    return self._pipe(
+                        prompt_embeds=batched_prompt_embeds,
+                        negative_prompt_embeds=batched_negative_prompt_embeds,
+                        pooled_prompt_embeds=batched_pooled_prompt_embeds,
+                        negative_pooled_prompt_embeds=batched_negative_pooled_prompt_embeds,
+                        guidance_scale=guidance_scale, 
+                        num_inference_steps=num_inference_steps,
+                        width=width,
+                        height=height,
+                        callback_on_step_end=wrapped_callback
+                    )
 
                 result = await asyncio.to_thread(_run_inference_in_stream)
 
