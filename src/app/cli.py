@@ -95,18 +95,38 @@ def handle_output(args: argparse.Namespace, response: Any) -> None:
     """Handles saving the generation results to disk."""
     if args.output and response.output_files_bytes:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Determine base directory and filename pattern
-        if os.path.isdir(args.output):
-            base_dir = args.output
+
+        # Resolve absolute paths for validation
+        abs_output = os.path.abspath(args.output)
+        safe_base = os.getcwd()
+
+        # Determine the directory we will actually be writing into
+        if os.path.isdir(abs_output):
+            target_dir = abs_output
+        elif os.path.isfile(abs_output):
+            target_dir = os.path.dirname(abs_output)
+        else:
+            # If it doesn't exist, we treat the path as a directory (as per current implementation)
+            target_dir = abs_output
+
+        # Validate target_dir is within safe_base
+        try:
+            if os.path.commonpath([safe_base]) != os.path.commonpath([safe_base, target_dir]):
+                raise ValidationError(f"Security Error: Output path '{args.output}' is outside the allowed directory.")
+        except ValueError:
+            raise ValidationError(f"Security Error: Output path '{args.output}' is on a different drive or invalid.")
+
+        # Determine base directory and filename pattern (using validated abs_output)
+        if os.path.isdir(abs_output):
+            base_dir = abs_output
             file_pattern = f"{timestamp}_%d.png"
-        elif os.path.isfile(args.output):
-            base_dir = os.path.dirname(args.output) or "."
-            name, ext = os.path.splitext(os.path.basename(args.output))
+        elif os.path.isfile(abs_output):
+            base_dir = os.path.dirname(abs_output) or "."
+            name, ext = os.path.splitext(os.path.basename(abs_output))
             file_pattern = f"{name}_{timestamp}_%d{ext}"
         else:
             # Assume it's a directory path that doesn't exist yet
-            base_dir = args.output
+            base_dir = abs_output
             file_pattern = f"{timestamp}_%d.png"
 
         os.makedirs(base_dir, exist_ok=True)
