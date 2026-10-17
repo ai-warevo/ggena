@@ -41,20 +41,20 @@
 
             <!-- Tabs -->
             <div class="tabs">
-                <button class="tab-btn" data-mode="ez" title="Simplified mode: Expand a simple keyword or idea using the text AI model">EZ Mode</button>
-                <button class="tab-btn active" data-mode="advanced" title="Expert mode: Full manual control over raw positive and negative tags">Advanced</button>
+                <button class="tab-btn active" data-mode="ez" title="Simplified mode: Expand a simple keyword or idea using the text AI model">EZ Mode</button>
+                <button class="tab-btn" data-mode="advanced" title="Expert mode: Full manual control over raw positive and negative tags">Advanced</button>
             </div>
 
             <!-- EZ Mode Container -->
-            <div id="ez-mode-container" class="mode-container" style="display: none;">
+            <div id="ez-mode-container" class="mode-container">
                 <div class="input-group">
                     <label for="prompt">Prompt (Intent)</label>
-                    <textarea id="prompt" placeholder="Describe what you want to see in natural language..."></textarea>
+                    <textarea id="prompt" placeholder="Describe what you want to see in natural language...">random</textarea>
                 </div>
             </div>
 
             <!-- Advanced Mode Container -->
-            <div id="advanced-mode-container" class="mode-container">
+            <div id="advanced-mode-container" class="mode-container" style="display: none;">
                 <div class="input-group">
                     <label for="positive_prompt">Positive Tags</label>
                     <textarea id="positive_prompt" placeholder="e.g. 1girl, solo, masterpiece..."></textarea>
