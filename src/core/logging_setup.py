@@ -3,7 +3,8 @@ import sys
 import os
 import re
 import structlog
-from src.core.config import config
+from typing import Optional
+from src.core.config import ConfigManager, config
 
 class RedactingProcessor:
     """
@@ -30,11 +31,14 @@ class RedactingProcessor:
                 pass
         return event_dict
 
-def setup_logging():
+def setup_logging(cfg: Optional[ConfigManager] = None):
     """
     Configures the global logging settings for the application using structlog.
     """
-    log_level_str = config.get_str("LOG_LEVEL", "INFO").upper()
+    if cfg is None:
+        cfg = config
+
+    log_level_str = cfg.get_str("LOG_LEVEL", "INFO").upper()
     levels = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,
@@ -44,7 +48,7 @@ def setup_logging():
     }
     level = levels.get(log_level_str, logging.INFO)
 
-    sensitive_keys_str = config.get_str("SENSITIVE_KEYS", "HF_TOKEN")
+    sensitive_keys_str = cfg.get_str("SENSITIVE_KEYS", "HF_TOKEN")
     sensitive_keys = [k.strip() for k in sensitive_keys_str.split(",") if k.strip()]
     redacting_processor = RedactingProcessor(sensitive_keys)
 
@@ -58,7 +62,7 @@ def setup_logging():
     ]
 
     # If we want JSON output in production
-    if config.get_bool("PRODUCTION", False):
+    if cfg.get_bool("PRODUCTION", False):
         processors.append(structlog.processors.JSONRenderer())
     else:
         processors.append(structlog.dev.ConsoleRenderer())
