@@ -16,7 +16,7 @@ from src.core.executor import CommandExecutor
 from src.core.logging_setup import setup_logging
 
 from src.app.server.middleware import MetricsMiddleware
-from src.app.server.routes import health_router, metrics_router, static_router, generation_router
+from src.app.server.routes import health_router, metrics_router, static_router, http_generation_router, ws_generation_router
 
 logger = structlog.get_logger(__name__)
 
@@ -79,7 +79,8 @@ app.mount("/static", StaticFiles(directory="src/app/frontend"), name="static")
 app.include_router(static_router)
 app.include_router(health_router)
 app.include_router(metrics_router)
-app.include_router(generation_router)
+app.include_router(http_generation_router)
+app.include_router(ws_generation_router)
 
 if __name__ == "__main__":
     port = config.get_int("PORT", 8000)
