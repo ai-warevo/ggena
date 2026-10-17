@@ -3,6 +3,6 @@ export const AppState = {
     imageHistory: [],
     currentRotationIndex: 0,
     zoomLevel: 1.0,
-    currentMode: 'ez',
+    currentMode: 'advanced',
     maxImages: 100
 };
