@@ -3,9 +3,10 @@ import asyncio
 import base64
 import torch
 import threading
-import logging
+import time
+import structlog
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -20,8 +21,10 @@ from src.core.config import ConfigManager, config
 from src.core.commands import GenerationCommand, CommandContext
 from src.core.executor import CommandExecutor
 from src.core.logging_setup import setup_logging
+from src.app.metrics import REQUEST_LATENCY, GENERATION_ERRORS, ACTIVE_GENERATIONS, metrics_endpoint
+from starlette.middleware.base import BaseHTTPMiddleware
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Pydantic models for FastAPI request/response validation
 class RequestModel(BaseModel):
@@ -37,6 +40,16 @@ class ResponseModel(BaseModel):
     metadata: Dict[str, Any] = {}
     error_message: Optional[str] = None
 
+class MetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.perf_counter()
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            process_time = time.perf_counter() - start_time
+            REQUEST_LATENCY.observe(process_time)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -49,19 +62,21 @@ async def lifespan(app: FastAPI):
     # Store them in app state for access in routes
     app.state.config = config
     app.state.registry = registry
+    app.state.models_loaded = False
 
     # Create a shutdown event to signal all running generators
     shutdown_event = threading.Event()
     app.state.shutdown_event = shutdown_event
     app.state.executor = CommandExecutor(CommandContext(registry=registry, config=config, shutdown_event=shutdown_event))
-
+    
     # 2. Pre-load models by getting singleton instances and setting shutdown event
     available = registry.list_available()
     logger.info(f"--- [Server] Available modules: {available} ---")
     for module in available:
         logger.info(f"--- [Server] Pre-loading model for '{module}'... ---")
-        generator = registry.get_instance(module, config=config)
+        registry.get_instance(module, config=config)
     
+    app.state.models_loaded = True
     # RTX 4080 Optimizations
     torch.backends.cuda.matmul.allow_tf32 = True
     logger.info("--- [Server] All models pre-loaded and GPU optimized! ---")
@@ -74,6 +89,7 @@ async def lifespan(app: FastAPI):
     await asyncio.sleep(1)
 
 app = FastAPI(title="ggena API Server", lifespan=lifespan)
+app.add_middleware(MetricsMiddleware)
 
 # Enable CORS for frontend development
 app.add_middleware(
@@ -91,6 +107,24 @@ app.mount("/static", StaticFiles(directory="src/app/frontend"), name="static")
 async def read_index():
     """Serves the main frontend page."""
     return FileResponse("src/app/frontend/index.html")
+
+@app.get("/metrics")
+async def get_metrics():
+    """Exposes Prometheus metrics."""
+    return metrics_endpoint()
+
+@app.get("/health/live")
+async def health_live():
+    """Liveness probe: returns 200 if the server is running."""
+    return {"status": "ok"}
+
+@app.get("/health/ready")
+async def health_ready(request: Request):
+    """Readiness probe: ensures models are loaded before serving traffic."""
+    if getattr(request.app.state, "models_loaded", False):
+        return {"status": "ready"}
+    else:
+        raise HTTPException(status_code=503, detail="Models not yet loaded")
 
 @app.post("/generate/{module}", response_model=ResponseModel)
 async def generate(module: str, request: RequestModel):
@@ -116,26 +150,33 @@ async def generate(module: str, request: RequestModel):
             parameters=validated_params
         )
 
-        logger.info(f"--- [Server] Processing request for '{module}': {request.prompt} ---")
+        logger.info("--- [Server] Processing request for module", module=module, prompt=request.prompt)
         
-        command = GenerationCommand(module=module, request=core_request)
-        result = await app.state.executor.execute(command)
+        ACTIVE_GENERATIONS.inc()
+        try:
+            command = GenerationCommand(module=module, request=core_request)
+            result = await app.state.executor.execute(command)
 
-        if not result.success:
-            # If the generator returned success=False, it might have its own error message
-            raise GeneratorError(result.error_message or "Generation failed.")
-        return result.result
+            if not result.success:
+                # If the generator returned success=False, it might have its own error message
+                raise GeneratorError(result.error_message or "Generation failed.")
+            return result.result
+        finally:
+            ACTIVE_GENERATIONS.dec()
 
     except RegistryError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(status_code=422, detail={"message": str(e), "details": e.details})
     except GeneratorError as e:
+        GENERATION_ERRORS.labels(module=module, error_type="GeneratorError").inc()
         raise HTTPException(status_code=500, detail=str(e))
     except GgenaError as e:
+        GENERATION_ERRORS.labels(module=module, error_type="GgenaError").inc()
         raise HTTPException(status_code=500, detail=f"Framework error: {str(e)}")
     except Exception as e:
-        logger.exception("--- [Server] Unexpected error during generation ---")
+        logger.exception("--- [Server] Unexpected error during generation ---", module=module)
+        GENERATION_ERRORS.labels(module=module, error_type="UnexpectedError").inc()
         if config.get_bool("PRODUCTION", False):
             raise HTTPException(status_code=500, detail="An internal server error occurred.")
         else:
@@ -147,7 +188,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
     WebSocket endpoint for real-time generation with progress updates.
     """
     await websocket.accept()
-    logger.info(f"--- [WS] Connection established for module '{module}' ---")
+    logger.info("--- [WS] Connection established ---", module=module)
     loop = asyncio.get_running_loop()
 
     try:
@@ -157,10 +198,10 @@ async def websocket_generate(websocket: WebSocket, module: str):
         while True:
             # Wait for a message from the client
             data = await websocket.receive_json()
-            logger.debug(f"--- [WS] Received message: {data} ---")
+            logger.debug("--- [WS] Received message ---", module=module, data=data)
             
             if data.get("type") == "generate":
-                logger.info(f"--- [WS] 'generate' type detected for module '{module}' ---")
+                logger.info("--- [WS] 'generate' type detected ---", module=module)
                 try:
                     generator = registry.get_instance(module, config=app.state.config)
                     if not generator:
@@ -176,7 +217,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
                     height = int(data.get("height", 1024))
                     num_outputs = int(data.get("num_outputs", 1))
 
-                    logger.info(f"--- [WS] Parameters: prompt='{prompt}', steps={steps}, cfg={cfg_scale}, res={width}x{height}, num_outputs={num_outputs} ---")
+                    logger.info("--- [WS] Parameters ---", module=module, prompt=prompt, steps=steps, cfg_scale=cfg_scale, res=f"{width}x{height}", num_outputs=num_outputs)
 
                     # Define the callback to send progress via WebSocket
                     def create_callback(total_steps):
@@ -207,7 +248,7 @@ async def websocket_generate(websocket: WebSocket, module: str):
                                 }
                                 asyncio.run_coroutine_threadsafe(websocket.send_json(image_data), loop)
                             except Exception as e:
-                                logger.error(f"--- [WS] Error in on_image_ready callback: {e} ---")
+                                logger.error("--- [WS] Error in on_image_ready callback ---", module=module, error=str(e))
 
                         return on_image_ready, lambda: images_sent_via_streaming
                     
@@ -230,67 +271,70 @@ async def websocket_generate(websocket: WebSocket, module: str):
                         }
                     )
 
-                    logger.info(f"--- [WS] Starting generation for '{module}' ---")
+                    logger.info("--- [WS] Starting generation ---", module=module)
                     
-                    response = await generator.generate(core_request)
-                    if not response.success:
-                        error_msg = response.error_message or "Unknown error"
-                        logger.error(f"--- [WS] Generation failed: {error_msg} ---")
-                        await websocket.send_json({"type": "error", "message": error_msg})
-                    else:
-                        if get_streaming_status():
-                            logger.info(f"--- [WS] Generation successful (images already streamed)! ---")
+                    ACTIVE_GENERATIONS.inc()
+                    try:
+                        response = await generator.generate(core_request)
+                        if not response.success:
+                            error_msg = response.error_message or "Unknown error"
+                            logger.error("--- [WS] Generation failed ---", module=module, error=error_msg)
+                            await websocket.send_json({"type": "error", "message": error_msg})
                         else:
-                            logger.info(f"--- [WS] Generation successful! Sending images... ---")
-                            # Convert output to Base64 and send as a list
-                            if response.output_files_bytes:
-                                try:
-                                    images_base64 = []
-                                    for img_bytes in response.output_files_bytes:
-                                        img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-                                        images_base64.append(f"data:image/png;base64,{img_b64}")
-                                    
-                                    await websocket.send_json({
-                                        "type": "image", 
-                                        "images": images_base64,
-                                        "positive_prompt": response.metadata.get("positive_prompt"),
-                                        "negative_prompt": response.metadata.get("negative_prompt")
-                                    })
-                                except Exception as e:
-                                    logger.error(f"--- [WS] Error encoding image bytes: {e} ---")
-                                    await websocket.send_json({"type": "error", "message": f"Failed to encode images: {e}"})
+                            if get_streaming_status():
+                                logger.info("--- [WS] Generation successful (images already streamed)! ---", module=module)
+                            else:
+                                logger.info("--- [WS] Generation successful! Sending images... ---", module=module)
+                                # Convert output to Base64 and send as a list
+                                if response.output_files_bytes:
+                                    try:
+                                        images_base64 = []
+                                        for img_bytes in response.output_files_bytes:
+                                            img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+                                            images_base64.append(f"data:image/png;base64,{img_b64}")
+                                        
+                                        await websocket.send_json({
+                                            "type": "image", 
+                                            "images": images_base64,
+                                            "positive_prompt": response.metadata.get("positive_prompt"),
+                                            "negative_prompt": response.metadata.get("negative_prompt")
+                                        })
+                                    except Exception as e:
+                                        logger.error("--- [WS] Error encoding image bytes ---", module=module, error=str(e))
+                                        await websocket.send_json({"type": "error", "message": f"Failed to encode images: {e}"})
+                    finally:
+                        ACTIVE_GENERATIONS.dec()
 
                 except RegistryError as e:
-                    logger.error(f"--- [WS] Registry error: {e} ---")
+                    logger.error("--- [WS] Registry error ---", module=module, error=str(e))
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except ValidationError as e:
-                    logger.error(f"--- [WS] Validation error: {e} ---")
+                    logger.error("--- [WS] Validation error ---", module=module, error=str(e))
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except GeneratorError as e:
-                    logger.error(f"--- [WS] Generation error: {e} ---")
+                    GENERATION_ERRORS.labels(module=module, error_type="GeneratorError").inc()
+                    logger.error("--- [WS] Generation error ---", module=module, error=str(e))
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except GgenaError as e:
-                    logger.error(f"--- [WS] Framework error: {e} ---")
+                    GENERATION_ERRORS.labels(module=module, error_type="GgenaError").inc()
+                    logger.error("--- [WS] Framework error ---", module=module, error=str(e))
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except Exception as e:
-                    logger.exception("--- [WS] Unexpected error in loop ---")
+                    logger.exception("--- [WS] Unexpected error in loop ---", module=module)
+                    GENERATION_ERRORS.labels(module=module, error_type="UnexpectedError").inc()
                     if config.get_bool("PRODUCTION", False):
                         await websocket.send_json({"type": "error", "message": "An internal server error occurred."})
                     else:
                         await websocket.send_json({"type": "error", "message": f"Unexpected error: {str(e)}"})
 
     except WebSocketDisconnect:
-        logger.info(f"--- [WS] Client disconnected from module '{module}' ---")
+        logger.info("--- [WS] Client disconnected ---", module=module)
     except Exception as e:
-        logger.error(f"--- [WS] Unexpected error in loop: {e} ---")
+        logger.error("--- [WS] Unexpected error in loop ---", module=module, error=str(e))
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
         except:
             pass
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
 
 if __name__ == "__main__":
     port = config.get_int("PORT", 8000)

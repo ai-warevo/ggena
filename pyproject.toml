@@ -21,6 +21,8 @@ dependencies = [
     "pydantic",
     "python-dotenv",
     "typing-extensions",
+    "structlog",
+    "prometheus-client",
 ]
 
 [project.scripts]
