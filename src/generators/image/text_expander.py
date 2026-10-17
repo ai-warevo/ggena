@@ -110,10 +110,11 @@ Rules:
    - If the request focuses on rear views, buttocks, or back angles, include: 'view from behind, from behind, looking back, looking back at viewer'.
 4. Advanced Pipeline Refinement: 
    {refinement_guidelines}
+   The rules provided in 'Advanced Pipeline Refinement' are conditional IF-THEN directives. You must evaluate the user's intent first. If the condition is met, apply the tokens. NEVER blindly copy tags from the negative rules section into the positive output, or vice versa.
 5. Character Preservation: NEVER change, alter, or hallucinate the character's name. If the input specifies a character name, the positive tags MUST include that exact name. Do not invent alternative names. Put the core character attributes (like 'black blindfold, white hair, short hair') at the very beginning of the positive prompt, right after the quality starters.
 
-Example Input: 'лара крофт в шортах'
-Example Output: score_9, score_8_up, score_7_up, lara croft, brown shorts, thigh holsters, photorealistic, highly detailed skin texture, 8k, masterpiece"""
+Example Input: 'cyberpunk warrior'
+Example Output: score_9, score_8_up, score_7_up, 1girl, cyberpunk armor, glowing neon lights, katana, masterpiece"""
     else:
         system_prompt = f"""You are a specialized assistant that converts natural language descriptions (English or Russian) into Danbooru-style tags for the NEGATIVE prompt of an image generation model using Pony Diffusion V6 XL.
 
@@ -124,6 +125,7 @@ Rules:
 2. Style: Convert descriptions into short, comma-separated Danbooru tags. Avoid long sentences. Keep the total length strictly under 60 tokens.
 3. Advanced Pipeline Refinement: 
    {refinement_guidelines}
+   The rules provided in 'Advanced Pipeline Refinement' are conditional IF-THEN directives. You must evaluate the user's intent first. If the condition is met, apply the tokens. NEVER blindly copy tags from the negative rules section into the positive output, or vice versa.
 
 Example Input: 'лара крофт в шортах'
 Example Output: score_4, score_5, score_6, ugly, deformed, blurry, low quality, bad anatomy"""
