@@ -1,14 +1,7 @@
 import { connect } from './api.js';
 import * as ui from './ui.js';
 import { showToast, applyZoom } from './utils.js';
-
-// State
-let socket;
-let imageHistory = [];
-const MAX_IMAGES = 100;
-let currentRotationIndex = 0;
-let zoomLevel = 1.0;
-let currentMode = 'ez';
+import { AppState } from './state.js';
 
 /**
  * WebSocket Message Handler
@@ -21,17 +14,17 @@ function handleMessage(data) {
         
         if (newImages.length > 0) {
             // Add to history
-            imageHistory = [...imageHistory, ...newImages];
+            AppState.imageHistory = [...AppState.imageHistory, ...newImages];
 
             // Handle overflow: keep only the last MAX_IMAGES
-            if (imageHistory.length > MAX_IMAGES) {
-                const overflow = imageHistory.length - MAX_IMAGES;
-                imageHistory = imageHistory.slice(overflow);
+            if (AppState.imageHistory.length > AppState.maxImages) {
+                const overflow = AppState.imageHistory.length - AppState.maxImages;
+                AppState.imageHistory = AppState.imageHistory.slice(overflow);
             }
 
             // Set current index to the first of the new images
-            currentRotationIndex = imageHistory.length - newImages.length;
-            ui.updateImage(imageHistory[currentRotationIndex]);
+            AppState.currentRotationIndex = AppState.imageHistory.length - newImages.length;
+            ui.updateImage(AppState.imageHistory[AppState.currentRotationIndex]);
 
             ui.elements.generateBtn.disabled = false;
             ui.elements.progressContainer.style.display = 'none';
@@ -67,7 +60,7 @@ function handleMessage(data) {
  */
 function startConnection() {
     ui.updateConnectionStatus('connecting');
-    socket = connect(
+    AppState.socket = connect(
         handleMessage,
         () => ui.updateConnectionStatus('connected'),
         () => {
@@ -84,7 +77,7 @@ function startConnection() {
  * UI Actions
  */
 function generate() {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!AppState.socket || AppState.socket.readyState !== WebSocket.OPEN) {
         showToast('WebSocket is not connected!', 'error');
         return;
     }
@@ -94,9 +87,9 @@ function generate() {
 
     const payload = {
         type: 'generate',
-        prompt: currentMode === 'ez' ? ui.elements.promptInput.value : null,
-        positive_prompt: currentMode === 'advanced' ? ui.elements.positivePromptInput.value || null : null,
-        negative_prompt: currentMode === 'advanced' ? ui.elements.negPromptInput.value || null : null,
+        prompt: AppState.currentMode === 'ez' ? ui.elements.promptInput.value : null,
+        positive_prompt: AppState.currentMode === 'advanced' ? ui.elements.positivePromptInput.value || null : null,
+        negative_prompt: AppState.currentMode === 'advanced' ? ui.elements.negPromptInput.value || null : null,
         steps: parseInt(ui.elements.stepsInput.value),
         cfg_scale: parseFloat(ui.elements.cfgScaleInput.value),
         width: width,
@@ -108,7 +101,7 @@ function generate() {
 
     ui.resetUI();
     ui.elements.generateBtn.disabled = true;
-    socket.send(JSON.stringify(payload));
+    AppState.socket.send(JSON.stringify(payload));
 }
 
 function saveImage() {
@@ -121,34 +114,34 @@ function saveImage() {
 }
 
 function nextImage() {
-    if (imageHistory.length === 0) return;
-    currentRotationIndex = (currentRotationIndex + 1) % imageHistory.length;
-    ui.updateImage(imageHistory[currentRotationIndex]);
+    if (AppState.imageHistory.length === 0) return;
+    AppState.currentRotationIndex = (AppState.currentRotationIndex + 1) % AppState.imageHistory.length;
+    ui.updateImage(AppState.imageHistory[AppState.currentRotationIndex]);
     resetZoom();
 }
 
 function prevImage() {
-    if (imageHistory.length === 0) return;
-    currentRotationIndex = (currentRotationIndex - 1 + imageHistory.length) % imageHistory.length;
-    ui.updateImage(imageHistory[currentRotationIndex]);
+    if (AppState.imageHistory.length === 0) return;
+    AppState.currentRotationIndex = (AppState.currentRotationIndex - 1 + AppState.imageHistory.length) % AppState.imageHistory.length;
+    ui.updateImage(AppState.imageHistory[AppState.currentRotationIndex]);
     resetZoom();
 }
 
 function zoomIn() {
-    zoomLevel += 0.2;
-    applyZoom(ui.elements.resultImage, zoomLevel);
+    AppState.zoomLevel += 0.2;
+    applyZoom(ui.elements.resultImage, AppState.zoomLevel);
 }
 
 function zoomOut() {
-    if (zoomLevel > 0.4) {
-        zoomLevel -= 0.2;
-        applyZoom(ui.elements.resultImage, zoomLevel);
+    if (AppState.zoomLevel > 0.4) {
+        AppState.zoomLevel -= 0.2;
+        applyZoom(ui.elements.resultImage, AppState.zoomLevel);
     }
 }
 
 function resetZoom() {
-    zoomLevel = 1.0;
-    applyZoom(ui.elements.resultImage, zoomLevel);
+    AppState.zoomLevel = 1.0;
+    applyZoom(ui.elements.resultImage, AppState.zoomLevel);
 }
 
 /**
@@ -160,8 +153,8 @@ function init() {
         btn.addEventListener('click', () => {
             ui.elements.tabBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            currentMode = btn.dataset.mode;
-            ui.setMode(currentMode);
+            AppState.currentMode = btn.dataset.mode;
+            ui.setMode(AppState.currentMode);
         });
     });
 
