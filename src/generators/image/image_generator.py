@@ -108,7 +108,7 @@ class ImageGenerator(BaseGenerator, ManagedResource):
 
     async def load(self) -> None:
         if self._pipe is None:
-            logger.info(f"Loading model '{self._model_id}' to GPU with offloading...")
+            logger.info("Loading model '%s' to GPU with offloading...", self._model_id)
             # Use injected config if available, otherwise fallback
             hf_token = None
             if self._config:
@@ -132,7 +132,7 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             # --- [TensorRT Phase] Check for existing TensorRT engine ---
             trt_engine_path = self._config.get_str("TENSORRT_UNET_PATH")
             if trt_engine_path and os.path.exists(trt_engine_path):
-                logger.info(f"--- [TensorRT Phase] TensorRT engine found at {trt_engine_path}. (Loading logic placeholder) ---")
+                logger.info("--- [TensorRT Phase] TensorRT engine found at %s. (Loading logic placeholder) ---", trt_engine_path)
                 # ponytail: <ceiling>, implement actual TRT loading via tensorrt or torch-tensorrt
                 pass
 
@@ -141,7 +141,7 @@ class ImageGenerator(BaseGenerator, ManagedResource):
                 self._pipe.unet = torch.compile(self._pipe.unet, mode="reduce-overhead")
                 self._pipe.vae = torch.compile(self._pipe.vae, mode="reduce-overhead")
             except Exception as e:
-                logger.warning(f"torch.compile failed for UNet/VAE: {e}. Proceeding without compilation.")
+                logger.warning("torch.compile failed for UNet/VAE: %s. Proceeding without compilation.", e)
 
     async def unload(self) -> None:
         if self._pipe is not None:
@@ -182,9 +182,9 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             expanded_pos = ""
             expanded_neg = ""
 
-        logger.info(f"Original Prompt: {request.prompt}")
-        logger.info(f"Expanded Positive Prompt: {expanded_pos}")
-        logger.info(f"Expanded Negative Prompt: {expanded_neg}")
+        logger.info("Original Prompt: %s", request.prompt)
+        logger.info("Expanded Positive Prompt: %s", expanded_pos)
+        logger.info("Expanded Negative Prompt: %s", expanded_neg)
 
         # --- [LoRA Phase] Dynamic LoRA loading ---
         lora_pattern = r'<lora:(.*?):([\d\.]+)>'
@@ -198,16 +198,16 @@ class ImageGenerator(BaseGenerator, ManagedResource):
 
                 # Validate filename to prevent path traversal (only alphanumeric, underscores, or hyphens)
                 if not re.match(r'^[a-zA-Z0-9_-]+$', filename):
-                    logger.warning(f"--- [LoRA Warning] Invalid LoRA filename: {filename} (path traversal attempt or invalid characters) ---")
+                    logger.warning("--- [LoRA Warning] Invalid LoRA filename: %s (path traversal attempt or invalid characters) ---", filename)
                     continue
 
                 lora_path = f"civitai_cache/{filename}.safetensors"
                 if os.path.exists(lora_path):
-                    logger.info(f"--- [LoRA Phase] Dynamically loading {filename}.safetensors with weight {weight} ---")
+                    logger.info("--- [LoRA Phase] Dynamically loading %s.safetensors with weight %s ---", filename, weight)
                     self._pipe.load_lora_weights("civitai_cache/", weight_name=f"{filename}.safetensors", adapter_name=filename)
                     self._pipe.set_adapters([filename], adapter_weights=[weight])
                 else:
-                    logger.warning(f"--- [LoRA Warning] File not found at {lora_path} ---")
+                    logger.warning("--- [LoRA Warning] File not found at %s ---", lora_path)
         
         return expanded_pos, expanded_neg, req_pos
 
@@ -247,7 +247,7 @@ class ImageGenerator(BaseGenerator, ManagedResource):
                 logger.warning("--- [Image Phase] Shutdown signal detected before starting next batch! ---")
                 raise GenerationCancelledError("Generation cancelled due to shutdown.")
 
-            logger.info(f"Generating batch of {current_batch_size} images (starting from index {i})...")
+            logger.info("Generating batch of %d images (starting from index %d)...", current_batch_size, i)
 
             # Prepare batched embeddings
             batched_prompt_embeds = prompt_embeds.repeat(current_batch_size, 1, 1)
@@ -325,7 +325,7 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             except GenerationCancelledError:
                 raise
             except Exception as e:
-                logger.error(f"--- [Image Phase] Error during prompt expansion or LoRA loading: {e} ---")
+                logger.error("--- [Image Phase] Error during prompt expansion or LoRA loading: %s ---", e)
                 raise GeneratorError(f"Prompt/LoRA error: {e}")
 
             # 3. Embeddings
@@ -334,7 +334,7 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             except GenerationCancelledError:
                 raise
             except Exception as e:
-                logger.error(f"--- [Image Phase] Error during embedding preparation: {e} ---")
+                logger.error("--- [Image Phase] Error during embedding preparation: %s ---", e)
                 raise GeneratorError(f"Embedding error: {e}")
 
             # 4. Inference
@@ -343,7 +343,7 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             except GenerationCancelledError:
                 raise
             except Exception as e:
-                logger.error(f"--- [Image Phase] Error during inference execution: {e} ---")
+                logger.error("--- [Image Phase] Error during inference execution: %s ---", e)
                 raise GeneratorError(f"Inference error: {e}")
 
             # 5. Cleanup & Response
@@ -362,14 +362,14 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             )
 
         except GenerationCancelledError as e:
-            logger.warning(f"--- [Image Phase] Generation cancelled: {e} ---")
+            logger.warning("--- [Image Phase] Generation cancelled: %s ---", e)
             return GenerationResponse(success=False, error_message=str(e))
         except ValidationError as e:
-            logger.error(f"--- [Image Phase] Validation error: {e} ---")
+            logger.error("--- [Image Phase] Validation error: %s ---", e)
             return GenerationResponse(success=False, error_message=str(e))
         except GeneratorError as e:
             # This catches the errors we raised in stages
-            logger.error(f"--- [Image Phase] Generator error: {e} ---")
+            logger.error("--- [Image Phase] Generator error: %s ---", e)
             return GenerationResponse(success=False, error_message=str(e))
         except Exception as e:
             logger.error("--- Error during image generation ---")

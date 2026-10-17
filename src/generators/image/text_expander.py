@@ -29,7 +29,7 @@ class TextExpanderModel(ManagedResource):
         if self._model is not None:
             return
 
-        logger.info(f"--- [Text Phase] Loading text model '{self._model_id}' ---")
+        logger.info("--- [Text Phase] Loading text model '%s' ---", self._model_id)
         try:
             self._tokenizer = await asyncio.to_thread(AutoTokenizer.from_pretrained, self._model_id, token=self._hf_token)
             
@@ -49,12 +49,12 @@ class TextExpanderModel(ManagedResource):
                 dtype=torch.float16
             )
         except Exception as e:
-            logger.error(f"--- [Text Phase] Failed to load model: {e} ---")
+            logger.error("--- [Text Phase] Failed to load model: %s ---", e)
             raise
 
     async def unload(self) -> None:
         if self._model is not None:
-            logger.info(f"--- [Text Phase] Unloading text model '{self._model_id}' ---")
+            logger.info("--- [Text Phase] Unloading text model '%s' ---", self._model_id)
             del self._model
             del self._tokenizer
             self._model = None
@@ -139,7 +139,7 @@ Example Output: score_4, score_5, score_6, ugly, deformed, blurry, low quality, 
     model_inputs = await asyncio.to_thread(tokenizer, [text], return_tensors="pt")
     model_inputs = {k: v.to("cuda") for k, v in model_inputs.items()}
 
-    logger.info(f"Expanding {mode} prompt: '{user_input}'")
+    logger.info("Expanding %s prompt: '%s'", mode, user_input)
     generated_ids = await asyncio.to_thread(
         _generate_in_stream, model, model_inputs, max_new_tokens=128, do_sample=True, temperature=0.2, top_p=0.9, repetition_penalty=1.35
     )
@@ -176,7 +176,7 @@ async def _refine_prompt(
     ]
     refined_pos = await asyncio.to_thread(tokenizer.batch_decode, response_ids_refine, skip_special_tokens=True)
     refined_pos = refined_pos[0].strip()
-    logger.info(f"--- [Text Phase] Refined Positive: {refined_pos}")
+    logger.info("--- [Text Phase] Refined Positive: %s", refined_pos)
 
     # Ensure quality starters are present in the refined positive prompt
     quality_starters = "score_9, score_8_up, score_7_up,"
@@ -205,10 +205,10 @@ async def translate_user_intent_to_tags(user_input: str, model_id: str, hf_token
 
     # Pass 2: Refinement (Positive only)
     try:
-        logger.info(f"--- [Text Phase] Initial Positive: {positive_tags}")
+        logger.info("--- [Text Phase] Initial Positive: %s", positive_tags)
         refined_pos = await _refine_prompt(model, tokenizer, user_input, refinement_guidelines, positive_tags)
         positive_tags = refined_pos
     except Exception as e:
-        logger.warning(f"--- [Text Phase] Refinement failed, using initial tags: {e} ---")
+        logger.warning("--- [Text Phase] Refinement failed, using initial tags: %s ---", e)
 
     return positive_tags, negative_tags

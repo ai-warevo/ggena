@@ -82,7 +82,7 @@ def setup_logging(cfg: Optional[ConfigManager] = None):
         handlers=[logging.StreamHandler(sys.stdout)]
     )
 
-    logging.info(f"Logging initialized with level: {logging.getLevelName(level)}")
+    logging.info("Logging initialized with level: %s", logging.getLevelName(level))
 
 if __name__ == "__main__":
     # Test the setup

@@ -36,12 +36,12 @@ class CommandExecutor:
         Executes a command and records the result in the audit log.
         """
         command_name = command.__class__.__name__
-        logger.info(f"Executing command: {command_name}")
+        logger.info("Executing command: %s", command_name)
 
         try:
             result = await command.execute(self._context)
         except Exception as e:
-            logger.exception(f"Unexpected error executing command {command_name}: {e}")
+            logger.exception("Unexpected error executing command %s: %s", command_name, e)
             result = CommandResult(success=False, error_message=str(e))
 
         # Audit logging

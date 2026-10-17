@@ -14,17 +14,17 @@ def discover_and_register_generators(package_name: str, registry: GeneratorRegis
     try:
         package = importlib.import_module(package_name)
     except ImportError as e:
-        logger.error(f"Error importing package {package_name}: {e}")
+        logger.error("Error importing package %s: %s", package_name, e)
         return
 
-    logger.info(f"--- [Orchestrator] Discovering generators in '{package_name}' ---")
+    logger.info("--- [Orchestrator] Discovering generators in '%s' ---", package_name)
     
     for module_info in pkgutil.walk_packages(package.__path__, prefix=f"{package_name}."):
-        logger.info(f"  -> Loading {module_info.name}...")
+        logger.info("  -> Loading %s...", module_info.name)
         try:
             importlib.import_module(module_info.name)
         except Exception as e:
-            logger.error(f"Failed to load module {module_info.name}: {e}")
+            logger.error("Failed to load module %s: %s", module_info.name, e)
 
     def get_all_subclasses(cls):
         subclasses = set(cls.__subclasses__())
@@ -39,5 +39,5 @@ def discover_and_register_generators(package_name: str, registry: GeneratorRegis
         names = getattr(gen_cls, "aliases", [gen_cls.__name__.lower().replace("generator", "")])
         
         for name in names:
-            logger.info(f"   [Registry] Auto-registered: {name} -> {gen_cls.__name__}")
+            logger.info("   [Registry] Auto-registered: %s -> %s", name, gen_cls.__name__)
             registry.register(name, gen_cls)

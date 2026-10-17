@@ -29,7 +29,7 @@ def process_parameters(generator: Any, args: argparse.Namespace) -> tuple[dict, 
                 key, value = p.split('=', 1)
                 extra_params[key] = value
             except ValueError:
-                logger.warning(f"Invalid parameter format '{p}'. Use key=value.")
+                logger.warning("Invalid parameter format '%s'. Use key=value.", p)
 
     # Validate extra parameters using generator's schema
     if generator.parameter_schema:

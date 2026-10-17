@@ -35,7 +35,7 @@ async def main():
 
         shutdown_event = setup_signal_handling()
 
-        logger.info(f"--- [Orchestrator] Dispatching request to '{args.module}' generator ---")
+        logger.info("--- [Orchestrator] Dispatching request to '%s' generator ---", args.module)
         
         context = CommandContext(registry=registry, config=config, shutdown_event=shutdown_event)
         executor = CommandExecutor(context)
@@ -47,23 +47,23 @@ async def main():
             handle_output(args, result.result)
         else:
             logger.error("--- [Orchestrator] Generation Failed ---")
-            logger.error(f"Error: {result.error_message}")
+            logger.error("Error: %s", result.error_message)
             sys.exit(1)
 
     except (asyncio.CancelledError, KeyboardInterrupt):
         logger.warning("--- [Orchestrator] Generation interrupted by user ---")
         sys.exit(1)
     except RegistryError as e:
-        logger.error(f"[Registry Error] {e}")
+        logger.error("[Registry Error] %s", e)
         sys.exit(1)
     except ValidationError as e:
-        logger.error(f"[Validation Error] {e}")
+        logger.error("[Validation Error] %s", e)
         sys.exit(1)
     except GeneratorError as e:
-        logger.error(f"[Generator Error] {e}")
+        logger.error("[Generator Error] %s", e)
         sys.exit(1)
     except GgenaError as e:
-        logger.error(f"[Framework Error] {e}")
+        logger.error("[Framework Error] %s", e)
         sys.exit(1)
     except Exception as e:
         logger.error("--- [Orchestrator] Unexpected error during execution ---")

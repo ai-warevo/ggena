@@ -79,11 +79,11 @@ def handle_output(args: Any, response: Any) -> None:
             full_path = os.path.join(base_dir, filename)
             with open(full_path, "wb") as f:
                 f.write(img_bytes)
-            logger.info(f"  - Saved to: {full_path}")
+            logger.info("  - Saved to: %s", full_path)
     elif response.output_files_bytes:
-        logger.info(f"  - Generated {len(response.output_files_bytes)} files (use --output to save)")
+        logger.info("  - Generated %d files (use --output to save)", len(response.output_files_bytes))
     else:
         logger.info("  - No file data returned.")
 
     if response.metadata:
-        logger.info(f"Metadata: {response.metadata}")
+        logger.info("Metadata: %s", response.metadata)

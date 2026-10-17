@@ -33,7 +33,7 @@ class ResourceManager:
         """Registers a managed resource."""
         self._resources[resource.name] = resource
         self._last_access[resource.name] = time.time()
-        logger.info(f"--- [ResourceManager] Registered resource '{resource.name}' ---")
+        logger.info("--- [ResourceManager] Registered resource '%s' ---", resource.name)
 
     async def acquire(self, name: str) -> ManagedResource:
         """Acquires a resource, loading it if necessary and managing VRAM."""
@@ -51,13 +51,13 @@ class ResourceManager:
             free_bytes, total_bytes = torch.cuda.mem_get_info()
             usage_mb = (total_bytes - free_bytes) / (1024 * 1024)
         except Exception as e:
-            logger.warning(f"Could not get VRAM info: {e}. Proceeding with caution.")
+            logger.warning("Could not get VRAM info: %s. Proceeding with caution.", e)
             usage_mb = 0
 
-        logger.info(f"--- [ResourceManager] Current VRAM usage: {usage_mb:.2f} MB ---")
+        logger.info("--- [ResourceManager] Current VRAM usage: %.2f MB ---", usage_mb)
 
         if usage_mb > self._vram_threshold_mb:
-            logger.info(f"--- [ResourceManager] VRAM threshold exceeded ({self._vram_threshold_mb} MB). Attempting eviction... ---")
+            logger.info("--- [ResourceManager] VRAM threshold exceeded (%d MB). Attempting eviction... ---", self._vram_threshold_mb)
             await self._evict_inactive()
             
             # Re-check usage after eviction
@@ -67,13 +67,13 @@ class ResourceManager:
             except Exception:
                 pass
 
-        logger.info(f"--- [ResourceManager] Loading resource '{name}' ---")
+        logger.info("--- [ResourceManager] Loading resource '%s' ---", name)
         try:
             await resource.load()
             self._active_resources.add(name)
             self._last_access[name] = time.time()
         except Exception as e:
-            logger.error(f"Failed to load resource '{name}': {e}")
+            logger.error("Failed to load resource '%s': %s", name, e)
             raise
 
         return resource
@@ -86,7 +86,7 @@ class ResourceManager:
             # But for this implementation, we'll just mark it as inactive.
             self._active_resources.remove(name)
             self._last_access[name] = time.time()
-            logger.info(f"--- [ResourceManager] Resource '{name}' is now inactive ---")
+            logger.info("--- [ResourceManager] Resource '%s' is now inactive ---", name)
 
     async def _evict_inactive(self):
         """Unloads inactive resources using LRU strategy until usage is below threshold."""
@@ -111,11 +111,11 @@ class ResourceManager:
                 # Let's try to evict at least one if we entered this method.
                 pass
 
-            logger.info(f"--- [ResourceManager] Evicting inactive resource '{name}' ---")
+            logger.info("--- [ResourceManager] Evicting inactive resource '%s' ---", name)
             try:
                 await self._resources[name].unload()
             except Exception as e:
-                logger.error(f"Failed to unload resource '{name}': {e}")
+                logger.error("Failed to unload resource '%s': %s", name, e)
                 # We continue to try and evict other resources even if one fails
 
     def get_active_resources(self) -> Set[str]:

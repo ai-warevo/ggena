@@ -41,9 +41,9 @@ async def lifespan(app: FastAPI):
     
     # 2. Pre-load models by getting singleton instances and setting shutdown event
     available = registry.list_available()
-    logger.info(f"--- [Server] Available modules: {available} ---")
+    logger.info("--- [Server] Available modules: %s ---", available)
     for module in available:
-        logger.info(f"--- [Server] Pre-loading model for '{module}'... ---")
+        logger.info("--- [Server] Pre-loading model for '%s'... ---", module)
         registry.get_instance(module, config=config_mgr)
     
     app.state.models_loaded = True
