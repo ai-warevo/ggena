@@ -71,7 +71,7 @@ def setup_logging(cfg: Optional[ConfigManager] = None):
         processors=processors,
         logger_factory=structlog.stdlib.LoggerFactory(),
         wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_onFirstUse=True,
+        cache_logger_on_first_use=True,
     )
 
     # Also configure the standard logging library to use structlog's output if possible, 
