@@ -135,8 +135,11 @@ async def generate(module: str, request: RequestModel):
     except GgenaError as e:
         raise HTTPException(status_code=500, detail=f"Framework error: {str(e)}")
     except Exception as e:
-        logger.error(f"--- [Server] Unexpected error during generation: {str(e)} ---")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        logger.exception("--- [Server] Unexpected error during generation ---")
+        if config.get_bool("PRODUCTION", False):
+            raise HTTPException(status_code=500, detail="An internal server error occurred.")
+        else:
+            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @app.websocket("/ws/generate/{module}")
 async def websocket_generate(websocket: WebSocket, module: str):
@@ -270,8 +273,11 @@ async def websocket_generate(websocket: WebSocket, module: str):
                     logger.error(f"--- [WS] Framework error: {e} ---")
                     await websocket.send_json({"type": "error", "message": str(e)})
                 except Exception as e:
-                    logger.error(f"--- [WS] Unexpected error in loop: {e} ---")
-                    await websocket.send_json({"type": "error", "message": f"Unexpected error: {str(e)}"})
+                    logger.exception("--- [WS] Unexpected error in loop ---")
+                    if config.get_bool("PRODUCTION", False):
+                        await websocket.send_json({"type": "error", "message": "An internal server error occurred."})
+                    else:
+                        await websocket.send_json({"type": "error", "message": f"Unexpected error: {str(e)}"})
 
     except WebSocketDisconnect:
         logger.info(f"--- [WS] Client disconnected from module '{module}' ---")
