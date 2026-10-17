@@ -208,6 +208,11 @@ class ImageGenerator(BaseGenerator, ManagedResource):
                     # Clean the text prompt string by completely removing the <lora...> block
                     expanded_pos = expanded_pos.replace(match.group(0), "").strip()
 
+                    # Validate filename to prevent path traversal (only alphanumeric, underscores, or hyphens)
+                    if not re.match(r'^[a-zA-Z0-9_-]+$', filename):
+                        logger.warning(f"--- [LoRA Warning] Invalid LoRA filename: {filename} (path traversal attempt or invalid characters) ---")
+                        continue
+
                     lora_path = f"civitai_cache/{filename}.safetensors"
                     if os.path.exists(lora_path):
                         logger.info(f"--- [LoRA Phase] Dynamically loading {filename}.safetensors with weight {weight} ---")
