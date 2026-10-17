@@ -31,7 +31,7 @@
 <body>
     <div class="app-container">
         <!-- Left Panel: Settings -->
-        <aside class="settings-panel">
+        <aside class="settings-panel" id="settings-panel">
             <h1>Generator</h1>
             
             <div class="status-badge" id="connection-status">
@@ -95,6 +95,7 @@
 
         <!-- Right Panel: Preview -->
         <main class="preview-panel">
+            <button id="menu-toggle" class="hamburger-btn">☰</button>
             <div class="progress-container" id="progress-container" style="display: none;">
                 <div class="progress-bar-wrapper">
                     <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div >
@@ -118,6 +119,7 @@
             </div >
         </main>
     </div >
+    <div id="overlay" class="overlay"></div>
     <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

@@ -179,6 +179,16 @@ function init() {
     ui.elements.prevBtn.addEventListener('click', prevImage);
     ui.elements.nextBtn.addEventListener('click', nextImage);
 
+    // Mobile Menu Toggle
+    ui.elements.menuToggle.addEventListener('click', () => {
+        ui.toggleSettings();
+    });
+
+    // Close settings when clicking overlay
+    ui.elements.overlay.addEventListener('click', () => {
+        ui.toggleSettings();
+    });
+
     // Keyboard
     window.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowLeft') prevImage();

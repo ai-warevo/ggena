@@ -23,7 +23,10 @@ export const elements = {
     advancedContainer: document.getElementById('advanced-mode-container'),
     tabBtns: document.querySelectorAll('.tab-btn'),
     stepsVal: document.getElementById('steps-val'),
-    cfgVal: document.getElementById('cfg-val')
+    cfgVal: document.getElementById('cfg-val'),
+    menuToggle: document.getElementById('menu-toggle'),
+    settingsPanel: document.getElementById('settings-panel'),
+    overlay: document.getElementById('overlay')
 };
 
 export function updateConnectionStatus(status) {
@@ -72,4 +75,9 @@ export function updateImage(src) {
     elements.imageWrapper.style.display = 'block';
     elements.placeholder.style.display = 'none';
     elements.actionArea.style.display = 'block';
+}
+
+export function toggleSettings() {
+    const isOpen = elements.settingsPanel.classList.toggle('open');
+    elements.overlay.classList.toggle('active', isOpen);
 }
