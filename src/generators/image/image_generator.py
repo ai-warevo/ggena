@@ -123,6 +123,13 @@ class ImageGenerator(BaseGenerator):
             )
             self._pipe.to("cuda")
 
+            # --- [TensorRT Phase] Check for existing TensorRT engine ---
+            trt_engine_path = self._config.get_str("TENSORRT_UNET_PATH")
+            if trt_engine_path and os.path.exists(trt_engine_path):
+                logger.info(f"--- [TensorRT Phase] TensorRT engine found at {trt_engine_path}. (Loading logic placeholder) ---")
+                # ponytail: <ceiling>, implement actual TRT loading via tensorrt or torch-tensorrt
+                pass
+
             logger.info("Compiling UNet and VAE with torch.compile (mode='reduce-overhead')...")
             try:
                 self._pipe.unet = torch.compile(self._pipe.unet, mode="reduce-overhead")
@@ -237,20 +244,23 @@ class ImageGenerator(BaseGenerator):
                         return original_callback(pipe, step_index, timestep, callback_kwargs)
                     return callback_kwargs
 
-                # Use to_thread for the heavy synchronous pipeline call
-                result = await asyncio.to_thread(
-                    lambda: self._pipe(
-                        prompt_embeds=batched_prompt_embeds,
-                        negative_prompt_embeds=batched_negative_prompt_embeds,
-                        pooled_prompt_embeds=batched_pooled_prompt_embeds,
-                        negative_pooled_prompt_embeds=batched_negative_pooled_prompt_embeds,
-                        guidance_scale=guidance_scale, 
-                        num_inference_steps=num_inference_steps,
-                        width=width,
-                        height=height,
-                        callback_on_step_end=wrapped_callback
-                    )
-                )
+                # Use to_thread with a custom function that uses a CUDA stream
+                def _run_inference_in_stream():
+                    stream = torch.cuda.Stream()
+                    with torch.cuda.stream(stream):
+                        return self._pipe(
+                            prompt_embeds=batched_prompt_embeds,
+                            negative_prompt_embeds=batched_negative_prompt_embeds,
+                            pooled_prompt_embeds=batched_pooled_prompt_embeds,
+                            negative_pooled_prompt_embeds=batched_negative_pooled_prompt_embeds,
+                            guidance_scale=guidance_scale, 
+                            num_inference_steps=num_inference_steps,
+                            width=width,
+                            height=height,
+                            callback_on_step_end=wrapped_callback
+                        )
+
+                result = await asyncio.to_thread(_run_inference_in_stream)
 
                 # Process the batch of images
                 for j in range(current_batch_size):

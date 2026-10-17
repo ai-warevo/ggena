@@ -74,15 +74,14 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
         # Move to cuda if not already there (though tokenizer might have done it or it's on CPU)
         model_inputs = {k: v.to("cuda") for k, v in model_inputs.items()}
 
+        def _generate_in_stream(model, model_inputs, **kwargs):
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                return model.generate(**model_inputs, **kwargs)
+
         logger.info(f"Expanding prompt: '{user_input}'")
         generated_ids = await asyncio.to_thread(
-            model.generate,
-            **model_inputs, 
-            max_new_tokens=128,
-            do_sample=True,
-            temperature=0.2,
-            top_p=0.9,
-            repetition_penalty=1.35
+            _generate_in_stream, model, model_inputs, max_new_tokens=128, do_sample=True, temperature=0.2, top_p=0.9, repetition_penalty=1.35
         )
         response_ids = [
             output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs["input_ids"], generated_ids)
@@ -125,13 +124,14 @@ Example Output: {{"positive": "score_9, score_8_up, score_7_up, lara croft, brow
             model_inputs_refine = await asyncio.to_thread(tokenizer, [refinement_text], return_tensors="pt")
             model_inputs_refine = {k: v.to("cuda") for k, v in model_inputs_refine.items()}
 
+            def _generate_in_stream(model, model_inputs, **kwargs):
+                stream = torch.cuda.Stream()
+                with torch.cuda.stream(stream):
+                    return model.generate(**model_inputs, **kwargs)
+
             logger.info("--- [Text Phase] Refining positive prompt...")
             generated_ids_refine = await asyncio.to_thread(
-                model.generate,
-                **model_inputs_refine, 
-                max_new_tokens=128,
-                do_sample=False,
-                temperature=0.1
+                _generate_in_stream, model, model_inputs_refine, max_new_tokens=128, do_sample=False, temperature=0.1
             )
             response_ids_refine = [
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs_refine["input_ids"], generated_ids_refine)
