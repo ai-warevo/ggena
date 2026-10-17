@@ -1,0 +1,38 @@
+.progress-container {
+    position: absolute;
+    top: 40px;
+    width: 100%;
+    max-width: 500px;
+    z-index: 10;
+}
+
+.progress-bar-wrapper {
+    height: 6px;
+    background-color: var(--input-bg);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background-color: var(--accent-color);
+    transition: width 0.2s ease;
+}
+
+.progress-bar.active {
+    animation: progressPulse 2s infinite ease-in-out;
+}
+
+@keyframes progressPulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+}
+
+.status-text {
+    font-size: 0.85rem;
+    text-align: center;
+    color: #a1a1aa;
+}

@@ -1,0 +1,11 @@
+:root {
+    --bg-color: #0f0f12;
+    --panel-bg: #1a1a1e;
+    --text-color: #e0e0e0;
+    --accent-color: #6366f1;
+    --accent-hover: #4f46e5;
+    --border-color: #2d2d33;
+    --input-bg: #252529;
+    --error-color: #ef4444;
+    --success-color: #10b981;
+}

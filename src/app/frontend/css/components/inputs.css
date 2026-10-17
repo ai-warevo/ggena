@@ -1,0 +1,46 @@
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #a1a1aa;
+}
+
+textarea, select {
+    background-color: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: white;
+    padding: 12px;
+    font-size: 0.9rem;
+    resize: none;
+}
+
+textarea {
+    height: 100px;
+}
+
+select {
+    cursor: pointer;
+}
+
+.control-row {
+    display: flex;
+    gap: 15px;
+}
+
+.control-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent-color);
+}
