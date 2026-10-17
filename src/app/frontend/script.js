@@ -97,6 +97,7 @@ function connect() {
             progressContainer.style.display = 'block';
             const percent = Math.round((data.step / data.total_steps) * 100);
             progressBar.style.width = `${percent}%`;
+            progressBar.setAttribute('aria-valuenow', percent);
             statusTextProgress.textContent = `Generating: ${percent}% (${data.step}/${data.total_steps})`;
         } else if (data.type === 'image') {
             console.log('[Frontend] Image(s) received from server');
@@ -259,3 +260,4 @@ window.addEventListener('keydown', (e) => {
 
 // Initialize connection
 connect();
+

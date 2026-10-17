@@ -97,9 +97,9 @@
         <main class="preview-panel">
             <div class="progress-container" id="progress-container" style="display: none;">
                 <div class="progress-bar-wrapper">
-                    <div class="progress-bar" id="progress-bar"></div>
+                    <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div >
                 </div >
-                <div class="status-text" id="status-text">Preparing...</div>
+                <div class="status-text" id="status-text" aria-live="polite">Preparing...</div >
             </div >
 
             <div class="image-display">
@@ -107,9 +107,9 @@
                     <span>Your masterpiece will appear here</span>
                 </div>
                 <div id="image-wrapper" style="display: none; position: relative;">
-                    <button id="prev-btn" class="nav-btn">&lt;</button>
+                    <button id="prev-btn" class="nav-btn" aria-label="Previous Image">&lt;</button>
                     <img id="result-image" src="" alt="Generated Image">
-                    <button id="next-btn" class="nav-btn">&gt;</button>
+                    <button id="next-btn" class="nav-btn" aria-label="Next Image">&gt;</button>
                 </div>
             </div>
 
@@ -121,3 +121,5 @@
     <script src="/static/script.js"></script>
 </body>
 </html>
+
+
