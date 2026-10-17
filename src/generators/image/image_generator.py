@@ -155,6 +155,151 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             self._pipe = None
             torch.cuda.empty_cache()
 
+    async def _get_expanded_prompts(self, request: GenerationRequest, context: Optional[Any]) -> tuple[str, str, str]:
+        """Handles text expansion and LoRA application."""
+        # 1. Determine Prompts (Priority: Request > Text Expander)
+        req_pos = request.positive_prompt
+        req_neg = request.negative_prompt
+
+        if req_pos:
+            expanded_pos = req_pos
+            expanded_neg = req_neg if req_neg else ""
+        elif request.prompt:
+            logger.info("--- [Image Phase] Expanding original prompt ---")
+            # Use the managed text expander model via context or singleton
+            model_id = self._config.get_str("TEXT_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
+            hf_token = self._config.get_str("HF_TOKEN")
+            
+            if context and context.resource_manager:
+                # Ensure text expander model is loaded via resource manager
+                await context.resource_manager.acquire("text_expander_llm")
+            
+            exp_pos, exp_neg_from_llm = await translate_user_intent_to_tags(request.prompt, model_id, hf_token)
+            expanded_pos = exp_pos
+            req_pos = exp_pos
+            expanded_neg = req_neg if req_neg else exp_neg_from_llm
+        else:
+            expanded_pos = ""
+            expanded_neg = ""
+
+        logger.info(f"Original Prompt: {request.prompt}")
+        logger.info(f"Expanded Positive Prompt: {expanded_pos}")
+        logger.info(f"Expanded Negative Prompt: {expanded_neg}")
+
+        # --- [LoRA Phase] Dynamic LoRA loading ---
+        lora_pattern = r'<lora:(.*?):([\d\.]+)>'
+        matches = list(re.finditer(lora_pattern, expanded_pos))
+        if matches:
+            for match in matches:
+                filename = match.group(1)
+                weight = float(match.group(2))
+                # Clean the text prompt string by completely removing the <lora...> block
+                expanded_pos = expanded_pos.replace(match.group(0), "").strip()
+
+                # Validate filename to prevent path traversal (only alphanumeric, underscores, or hyphens)
+                if not re.match(r'^[a-zA-Z0-9_-]+$', filename):
+                    logger.warning(f"--- [LoRA Warning] Invalid LoRA filename: {filename} (path traversal attempt or invalid characters) ---")
+                    continue
+
+                lora_path = f"civitai_cache/{filename}.safetensors"
+                if os.path.exists(lora_path):
+                    logger.info(f"--- [LoRA Phase] Dynamically loading {filename}.safetensors with weight {weight} ---")
+                    self._pipe.load_lora_weights("civitai_cache/", weight_name=f"{filename}.safetensors", adapter_name=filename)
+                    self._pipe.set_adapters([filename], adapter_weights=[weight])
+                else:
+                    logger.warning(f"--- [LoRA Warning] File not found at {lora_path} ---")
+        
+        return expanded_pos, expanded_neg, req_pos
+
+    async def _prepare_embeddings(self, expanded_pos: str, expanded_neg: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Handles CLIP encoding and device movement."""
+        logger.info("--- [Image Phase] Encoding prompts ---")
+        prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = await asyncio.to_thread(
+            encode_infinite_prompt, self._pipe, expanded_pos, expanded_neg
+        )
+
+        # Move embeddings to the same device as the pipeline (which might be CPU due to offloading!)
+        device = self._pipe.device
+        prompt_embeds = prompt_embeds.to(device)
+        negative_prompt_embeds = negative_prompt_embeds.to(device)
+        pooled_prompt_embeds = pooled_prompt_embeds.to(device)
+        negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.to(device)
+
+        return prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds
+
+    async def _execute_inference_batches(
+        self, 
+        request: GenerationRequest, 
+        params: ImageParameters, 
+        embeddings: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+        req_pos: str,
+        expanded_neg: str
+    ) -> List[bytes]:
+        """Manages the loop over batches and calls the model."""
+        prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = embeddings
+        output_files_bytes = []
+        
+        max_batch_size = self._config.get_int("IMAGE_MAX_BATCH_SIZE", 1)
+        for i in range(0, request.num_outputs, max_batch_size):
+            current_batch_size = min(max_batch_size, request.num_outputs - i)
+
+            if self._shutdown_event and self._shutdown_event.is_set():
+                logger.warning("--- [Image Phase] Shutdown signal detected before starting next batch! ---")
+                raise GenerationCancelledError("Generation cancelled due to shutdown.")
+
+            logger.info(f"Generating batch of {current_batch_size} images (starting from index {i})...")
+
+            # Prepare batched embeddings
+            batched_prompt_embeds = prompt_embeds.repeat(current_batch_size, 1, 1)
+            batched_negative_prompt_embeds = negative_prompt_embeds.repeat(current_batch_size, 1, 1)
+            batched_pooled_prompt_embeds = pooled_prompt_embeds.repeat(current_batch_size, 1)
+            batched_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.repeat(current_batch_size, 1)
+
+            # Wrap the callback to check for shutdown
+            def wrapped_callback(pipe, step_index, timestep, callback_kwargs):
+                if self._shutdown_event and self._shutdown_event.is_set():
+                    logger.warning("--- [Image Phase] Shutdown signal detected in callback! ---")
+                    raise GenerationCancelledError("Generation cancelled due to shutdown.")
+                if params.callback_on_step_end:
+                    return params.callback_on_step_end(pipe, step_index, timestep, callback_kwargs)
+                return callback_kwargs
+
+            # Use to_thread with a custom function that uses a CUDA stream (implied by the original code's comment)
+            def _run_inference_in_stream():
+                return self._pipe(
+                    prompt_embeds=batched_prompt_embeds,
+                    negative_prompt_embeds=batched_negative_prompt_embeds,
+                    pooled_prompt_embeds=batched_pooled_prompt_embeds,
+                    negative_pooled_prompt_embeds=batched_negative_pooled_prompt_embeds,
+                    guidance_scale=params.guidance_scale, 
+                    num_inference_steps=params.num_inference_steps,
+                    width=params.width,
+                    height=params.height,
+                    callback_on_step_end=wrapped_callback
+                )
+
+            result = await asyncio.to_thread(_run_inference_in_stream)
+
+            # Process the batch of images
+            for j in range(current_batch_size):
+                image = result.images[j]
+
+                # Always get bytes
+                buffer = io.BytesIO()
+                await asyncio.to_thread(image.save, buffer, format="PNG")
+                img_bytes = buffer.getvalue()
+                output_files_bytes.append(img_bytes)
+
+                # Check for streaming callback
+                if params.on_image_ready:
+                    await asyncio.to_thread(params.on_image_ready, img_bytes, {
+                        "positive_prompt": req_pos,
+                        "negative_prompt": expanded_neg,
+                        "model_id": self._model_id
+                    })
+
+        return output_files_bytes
+
     async def generate(self, request: GenerationRequest, context: Optional[Any] = None) -> GenerationResponse:
         """
         Generates images based on the provided request.
@@ -164,155 +309,48 @@ class ImageGenerator(BaseGenerator, ManagedResource):
         logger.info("--- [Image Phase] Starting Image Generation ---")
         
         try:
-            # 1. Determine Prompts (Priority: Request > Text Expander)
-            req_pos = request.positive_prompt
-            req_neg = request.negative_prompt
-
-            if req_pos:
-                expanded_pos = req_pos
-                expanded_neg = req_neg if req_neg else ""
-            elif request.prompt:
-                logger.info("--- [Image Phase] Expanding original prompt ---")
-                # Use the managed text expander model via context or singleton
-                model_id = self._config.get_str("TEXT_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
-                hf_token = self._config.get_str("HF_TOKEN")
-                
-                if context and context.resource_manager:
-                    # Ensure text expander model is loaded via resource manager
-                    await context.resource_manager.acquire("text_expander_llm")
-                
-                exp_pos, exp_neg_from_llm = await translate_user_intent_to_tags(request.prompt, model_id, hf_token)
-                expanded_pos = exp_pos
-                req_pos = exp_pos
-                expanded_neg = req_neg if req_neg else exp_neg_from_llm
-            else:
-                expanded_pos = ""
-                expanded_neg = ""
-
-            logger.info(f"Original Prompt: {request.prompt}")
-            logger.info(f"Expanded Positive Prompt: {expanded_pos}")
-            logger.info(f"Expanded Negative Prompt: {expanded_neg}")
-            logger.info(f"Number of images requested: {request.num_outputs}")
-
-            # 2. Load pipeline if not already loaded
-            if self._pipe is None:
-                await self.load()
-
-            # --- [LoRA Phase] Dynamic LoRA loading ---
-            lora_pattern = r'<lora:(.*?):([\d\.]+)>'
-            matches = list(re.finditer(lora_pattern, expanded_pos))
-            if matches:
-                for match in matches:
-                    filename = match.group(1)
-                    weight = float(match.group(2))
-                    # Clean the text prompt string by completely removing the <lora...> block
-                    expanded_pos = expanded_pos.replace(match.group(0), "").strip()
-
-                    # Validate filename to prevent path traversal (only alphanumeric, underscores, or hyphens)
-                    if not re.match(r'^[a-zA-Z0-9_-]+$', filename):
-                        logger.warning(f"--- [LoRA Warning] Invalid LoRA filename: {filename} (path traversal attempt or invalid characters) ---")
-                        continue
-
-                    lora_path = f"civitai_cache/{filename}.safetensors"
-                    if os.path.exists(lora_path):
-                        logger.info(f"--- [LoRA Phase] Dynamically loading {filename}.safetensors with weight {weight} ---")
-                        self._pipe.load_lora_weights("civitai_cache/", weight_name=f"{filename}.safetensors", adapter_name=filename)
-                        self._pipe.set_adapters([filename], adapter_weights=[weight])
-                    else:
-                        logger.warning(f"--- [LoRA Warning] File not found at {lora_path} ---")
-
-            # 2.5 Encode prompts to handle long prompts (CLIP 77-token limit) via chunking
-            logger.info("--- [Image Phase] Encoding prompts ---")
-            prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds = await asyncio.to_thread(
-                encode_infinite_prompt, self._pipe, expanded_pos, expanded_neg
-            )
-
-            # Move embeddings to the same device as the pipeline (which might be CPU due to offloading!)
-            device = self._pipe.device
-            prompt_embeds = prompt_embeds.to(device)
-            negative_prompt_embeds = negative_prompt_embeds.to(device)
-            pooled_prompt_embeds = pooled_prompt_embeds.to(device)
-            negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.to(device)
-
-            # 3. Generate images
-            output_files_bytes = []
-            timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
-
-            # Validate parameters using the schema
+            # 0. Validate parameters
             try:
                 params = ImageParameters(**request.parameters)
             except PydanticValidationError as e:
                 raise ValidationError(f"Invalid image parameters: {str(e)}", details=e.errors())
 
-            width = params.width
-            height = params.height
-            guidance_scale = params.guidance_scale
-            num_inference_steps = params.num_inference_steps
-            original_callback = params.callback_on_step_end
-            on_image_ready = params.on_image_ready
+            # 1. Load pipeline if not already loaded
+            if self._pipe is None:
+                await self.load()
 
-            max_batch_size = self._config.get_int("IMAGE_MAX_BATCH_SIZE", 1)
-            for i in range(0, request.num_outputs, max_batch_size):
-                current_batch_size = min(max_batch_size, request.num_outputs - i)
+            # 2. Expansion & LoRA
+            try:
+                expanded_pos, expanded_neg, req_pos = await self._get_expanded_prompts(request, context)
+            except GenerationCancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"--- [Image Phase] Error during prompt expansion or LoRA loading: {e} ---")
+                raise GeneratorError(f"Prompt/LoRA error: {e}")
 
-                if self._shutdown_event and self._shutdown_event.is_set():
-                    logger.warning("--- [Image Phase] Shutdown signal detected before starting next batch! ---")
-                    raise GenerationCancelledError("Generation cancelled due to shutdown.")
+            # 3. Embeddings
+            try:
+                embeddings = await self._prepare_embeddings(expanded_pos, expanded_neg)
+            except GenerationCancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"--- [Image Phase] Error during embedding preparation: {e} ---")
+                raise GeneratorError(f"Embedding error: {e}")
 
-                logger.info(f"Generating batch of {current_batch_size} images (starting from index {i})...")
+            # 4. Inference
+            try:
+                output_files_bytes = await self._execute_inference_batches(request, params, embeddings, req_pos, expanded_neg)
+            except GenerationCancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"--- [Image Phase] Error during inference execution: {e} ---")
+                raise GeneratorError(f"Inference error: {e}")
 
-                # Prepare batched embeddings
-                batched_prompt_embeds = prompt_embeds.repeat(current_batch_size, 1, 1)
-                batched_negative_prompt_embeds = negative_prompt_embeds.repeat(current_batch_size, 1, 1)
-                batched_pooled_prompt_embeds = pooled_prompt_embeds.repeat(current_batch_size, 1)
-                batched_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.repeat(current_batch_size, 1)
-
-                # Wrap the callback to check for shutdown
-                def wrapped_callback(pipe, step_index, timestep, callback_kwargs):
-                    if self._shutdown_event and self._shutdown_event.is_set():
-                        logger.warning("--- [Image Phase] Shutdown signal detected in callback! ---")
-                        raise GenerationCancelledError("Generation cancelled due to shutdown.")
-                    if original_callback:
-                        return original_callback(pipe, step_index, timestep, callback_kwargs)
-                    return callback_kwargs
-
-                # Use to_thread with a custom function that uses a CUDA stream
-                def _run_inference_in_stream():
-                    return self._pipe(
-                        prompt_embeds=batched_prompt_embeds,
-                        negative_prompt_embeds=batched_negative_prompt_embeds,
-                        pooled_prompt_embeds=batched_pooled_prompt_embeds,
-                        negative_pooled_prompt_embeds=batched_negative_pooled_prompt_embeds,
-                        guidance_scale=guidance_scale, 
-                        num_inference_steps=num_inference_steps,
-                        width=width,
-                        height=height,
-                        callback_on_step_end=wrapped_callback
-                    )
-
-                result = await asyncio.to_thread(_run_inference_in_stream)
-
-                # Process the batch of images
-                for j in range(current_batch_size):
-                    image = result.images[j]
-
-                    # Always get bytes
-                    buffer = io.BytesIO()
-                    await asyncio.to_thread(image.save, buffer, format="PNG")
-                    img_bytes = buffer.getvalue()
-                    output_files_bytes.append(img_bytes)
-
-                    # Check for streaming callback
-                    if on_image_ready:
-                        await asyncio.to_thread(on_image_ready, img_bytes, {
-                            "positive_prompt": req_pos,
-                            "negative_prompt": expanded_neg,
-                            "model_id": self._model_id
-                        })
-
+            # 5. Cleanup & Response
             logger.info("--- All images generated successfully! ---")
             logger.info("--- [LoRA Phase] Unloading LoRA weights from GPU memory ---")
             self._pipe.unload_lora_weights()
+            
             return GenerationResponse(
                 success=True, 
                 output_files_bytes=output_files_bytes,
@@ -325,20 +363,15 @@ class ImageGenerator(BaseGenerator, ManagedResource):
 
         except GenerationCancelledError as e:
             logger.warning(f"--- [Image Phase] Generation cancelled: {e} ---")
-            return GenerationResponse(
-                success=False, 
-                error_message=str(e)
-            )
+            return GenerationResponse(success=False, error_message=str(e))
         except ValidationError as e:
             logger.error(f"--- [Image Phase] Validation error: {e} ---")
-            return GenerationResponse(
-                success=False, 
-                error_message=str(e)
-            )
+            return GenerationResponse(success=False, error_message=str(e))
+        except GeneratorError as e:
+            # This catches the errors we raised in stages
+            logger.error(f"--- [Image Phase] Generator error: {e} ---")
+            return GenerationResponse(success=False, error_message=str(e))
         except Exception as e:
             logger.error("--- Error during image generation ---")
             logger.exception(str(e))
-            return GenerationResponse(
-                success=False, 
-                error_message=str(e)
-            )
+            return GenerationResponse(success=False, error_message=str(e))
