@@ -10,14 +10,24 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
 
 WORKDIR /workspace
 
+# Create a non-root user and group
+RUN groupadd -r ggena_group && useradd -r -g ggena_group -m -s /sbin/nologin ggena_user
+
 # Install uv for faster dependency management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy packaging files first to leverage Docker cache
 COPY pyproject.toml README.md ./
 
-# Install dependencies and the package in editable mode using uv
-# We use --system because we are installing into the container's global Python environment
-RUN uv pip install --system --no-cache -e .
+# Install dependencies and the package (not editable) using uv
+RUN uv pip install --system --no-cache .
 
+# Copy source code and static assets into the image
+COPY src/ ./src/
+COPY static/ ./static/
+
+# Ensure the workspace is owned by the non-root user
+RUN chown -R ggena_user:ggena_group /workspace
+
+USER ggena_user
 CMD ["/bin/bash"]

@@ -1,41 +1,60 @@
-# Docker Compose commands
 include .env
 export
 
-# Default values from .env if not provided via command line
 PROMPT ?= $(DEFAULT_PROMPT)
 IMAGE_GEN_COUNT ?= $(IMAGE_GEN_COUNT)
 
-.PHONY: dcu dcexec gen_image stop logs help server
+# Default track is local for development convenience
+TRACK ?= local
+COMPOSE_FILE := docker-compose.$(TRACK).yml
+
+.PHONY: help up exec gen_image stop logs server dev prod dev-up prod-up
+
 help:
+	@echo "Usage:"
+	@echo "  make dev             - Start local development (dev track)"
+	@echo "  make prod            - Start production (prod track)"
+	@echo "  make dev-<cmd>       - Run <cmd> in dev track (e.g., make dev-exec)"
+	@echo "  make prod-<cmd>      - Run <cmd> in prod track (e.g., make prod-gen_image)"
+	@echo ""
 	@echo "Available commands:"
-	@echo "  make gen_image PROMPT=\"your prompt\"   - Run via Docker (uses .env count)"
-	@echo "  make gen_image PROMPT=\"...\" IMAGE_GEN_COUNT=5     - Override count manually"
-	@echo "  make server                            - Start the long-running API server in background"
-	@echo "  make dcu                               - Build and start containers in background"
-	@echo "  make stop                              - Stop containers"
-	@echo "  make logs                              - View logs"
+	@echo "  up                   - Build and start containers"
+	@echo "  exec                 - Execute bash inside the container"
+	@echo "  gen_image            - Run image generation"
+	@echo "  server               - Start API server (and stop on exit)"
+	@echo "  stop                 - Stop containers"
+	@echo "  logs                 - View logs"
 
-# Build and start containers in background
-dcu:
-	docker compose up -d --build
+# Pattern rules for tracks: maps dev-<cmd> -> <cmd> with TRACK=local
+dev-%:
+	$(MAKE) $(subst dev-,,%) TRACK=local
 
-# Execute bash inside the container
-dcexec:
-	docker compose exec ai-app bash
+# Pattern rules for tracks: maps prod-<cmd> -> <cmd> with TRACK=prod
+prod-%:
+	$(MAKE) $(subst prod-,,%) TRACK=prod
 
-# Generate image (Usage: make gen_image PROMPT="your prompt" IMAGE_GEN_COUNT=5)
+# Shortcuts for the track names themselves
+dev:
+	$(MAKE) dev-up
+
+prod:
+	$(MAKE) prod-up
+
+# Core commands (using $(COMPOSE_FILE))
+up:
+	docker compose -f $(COMPOSE_FILE) up -d --build
+
+exec:
+	docker compose -f $(COMPOSE_FILE) exec ai-app bash
+
 gen_image:
-	docker compose exec ai-app python3 -m src.app.cli image $(PROMPT) --num-outputs $(IMAGE_GEN_COUNT)
+	docker compose -f $(COMPOSE_FILE) exec ai-app python3 -m src.app.cli image $(PROMPT) --num-outputs $(IMAGE_GEN_COUNT)
 
-# Start the API server and clean up on exit
-server: dcu
-	docker compose exec ai-app python3 -m src.app.server && docker compose down
+server: up
+	docker compose -f $(COMPOSE_FILE) exec ai-app python3 -m src.app.server && docker compose -f $(COMPOSE_FILE) down
 
-# Stop containers
 stop:
-	docker compose down
+	docker compose -f $(COMPOSE_FILE) down
 
-# View logs
 logs:
-	docker compose logs -f
+	docker compose -f $(COMPOSE_FILE) logs -f

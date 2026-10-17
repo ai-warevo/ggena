@@ -2,9 +2,9 @@ services:
   ai-app:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: ggena-ai
-    container_name: ggena_container
+      dockerfile: Dockerfile.local
+    image: ggena-ai-local
+    container_name: ggena_container_local
     ports:
       - "8000:8000"
     dns:

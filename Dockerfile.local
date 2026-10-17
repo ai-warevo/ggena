@@ -1,0 +1,22 @@
+FROM huggingface/transformers-pytorch-gpu
+
+ENV TZ=Asia/Krasnoyarsk
+ENV DEBIAN_FRONTEND=noninteractive  
+
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
+    apt-get update && apt-get install -y tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Install uv for faster dependency management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Copy packaging files first to leverage Docker cache
+COPY pyproject.toml README.md ./
+
+# Install dependencies and the package in editable mode using uv
+RUN uv pip install --system --no-cache -e .
+
+CMD ["/bin/bash"]

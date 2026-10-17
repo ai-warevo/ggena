@@ -1,0 +1,31 @@
+services:
+  ai-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    image: ggena-ai-prod
+    container_name: ggena_container_prod
+    ports:
+      - "8000:8000"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./outputs:/workspace/outputs
+      - ./civitai_cache:/workspace/civitai_cache
+      - hf_cache:/home/ggena_user/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+
+volumes:
+  hf_cache:
