@@ -1,4 +1,5 @@
 import torch
+import random
 from diffusers import StableDiffusionXLPipeline
 import io
 from datetime import datetime
@@ -106,6 +107,50 @@ class ImageGenerator(BaseGenerator, ManagedResource):
             import src.core.config as global_config
             self._model_id: str = global_config.config.get_str("IMAGE_MODEL_ID", "stablediffusionapi/Pony-Diffusion-V6-XL")
 
+    def _generate_random_prompt_from_env(self, character_name: str) -> str:
+        """Generates a randomized prompt using environment-driven token pools."""
+        starters = self._config.get_str("IMAGE_POSITIVE_STARTER", "").split(";")
+        base_chars = self._config.get_str("RANDOM_BASE_CHARACTER_TAGS", "").split(";")
+        actions_pool = self._config.get_str("RANDOM_ACTIONS", "").split(";")
+        skin_pool = self._config.get_str("RANDOM_SKIN_DETAILS", "").split(";")
+        camera_pool = self._config.get_str("RANDOM_CAMERA_ANGLES", "").split(";")
+        light_pool = self._config.get_str("RANDOM_LIGHTING", "").split(";")
+        env_pool = self._config.get_str("RANDOM_ENVIRONMENT", "").split(";")
+
+        def safe_choice(lst: list[str]) -> str:
+            # Filter empty strings from split results
+            valid = [item.strip() for item in lst if item.strip()]
+            return random.choice(valid) if valid else ""
+
+        starter = safe_choice(starters)
+        base_char_tag = safe_choice(base_chars)
+        action = safe_choice(actions_pool)
+        skin = safe_choice(skin_pool)
+        camera = safe_choice(camera_pool)
+        light = safe_choice(light_pool)
+        env = safe_choice(env_pool)
+
+        # Pipeline Merging: 1. Starters, 2. Name + base_chars, 3. Action, 4. Skin, 5. Camera, 6. Light, 7. Env
+        tokens = []
+        if starter: tokens.append(starter)
+        if character_name: tokens.append(character_name)
+        if base_char_tag: tokens.append(base_char_tag)
+        if action: tokens.append(action)
+        if skin: tokens.append(skin)
+        if camera: tokens.append(camera)
+        if light: tokens.append(light)
+        if env: tokens.append(env)
+
+        # Flatten all commas, strip white spaces, and filter duplicates
+        flattened = []
+        for t in tokens:
+            for part in t.split(","):
+                clean_part = part.strip()
+                if clean_part:
+                    flattened.append(clean_part)
+
+        return ", ".join(list(dict.fromkeys(flattened)))
+
     async def load(self) -> None:
         if self._pipe is None:
             logger.info("Loading model '%s' to GPU with offloading...", self._model_id)
@@ -136,12 +181,15 @@ class ImageGenerator(BaseGenerator, ManagedResource):
                 # ponytail: <ceiling>, implement actual TRT loading via tensorrt or torch-tensorrt
                 pass
 
-            logger.info("Compiling UNet and VAE with torch.compile (mode='reduce-overhead')...")
-            try:
-                self._pipe.unet = torch.compile(self._pipe.unet, mode="reduce-overhead")
-                self._pipe.vae = torch.compile(self._pipe.vae, mode="reduce-overhead")
-            except Exception as e:
-                logger.warning("torch.compile failed for UNet/VAE: %s. Proceeding without compilation.", e)
+            if self._config.get_bool("ENABLE_TORCH_COMPILE", False):
+                logger.info("Compiling UNet and VAE with torch.compile (mode='reduce-overhead')...")
+                try:
+                    self._pipe.unet = torch.compile(self._pipe.unet, mode="reduce-overhead")
+                    self._pipe.vae = torch.compile(self._pipe.vae, mode="reduce-overhead")
+                except Exception as e:
+                    logger.warning("torch.compile failed for UNet/VAE: %s. Proceeding without compilation.", e)
+            else:
+                logger.info("Skipping torch.compile (ENABLE_TORCH_COMPILE is false or not set).")
 
     async def unload(self) -> None:
         if self._pipe is not None:
@@ -164,6 +212,16 @@ class ImageGenerator(BaseGenerator, ManagedResource):
         if req_pos:
             expanded_pos = req_pos
             expanded_neg = req_neg if req_neg else ""
+        elif request.prompt == "random":
+            logger.info("--- [Image Phase] Generating random prompt from environment ---")
+            character_name = request.parameters.get("character", "")
+            expanded_pos = self._generate_random_prompt_from_env(character_name)
+            
+            neg_pool = self._config.get_str("IMAGE_NEGATIVE_STARTER", "").split(";")
+            valid_neg = [item.strip() for item in neg_pool if item.strip()]
+            expanded_neg = random.choice(valid_neg) if valid_neg else ""
+            
+            req_pos = expanded_pos
         elif request.prompt:
             logger.info("--- [Image Phase] Expanding original prompt ---")
             # Use the managed text expander model via context or singleton
