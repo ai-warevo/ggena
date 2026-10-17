@@ -79,10 +79,25 @@
             <div class="input-group">
                 <label for="resolution">Resolution</label>
                 <select id="resolution">
-                    <option value="832x1216">832 x 1216 (Portrait)</option>
-                    <option value="1216x832">1216 x 832 (Landscape)</option>
-                    <option value="1024x1024" selected>1024 x 1024 (Square)</option>
+                    <optgroup label="Вертикальные (Portrait)">
+                        <option value="832x1216">832 x 1216 (2:3)</option>
+                        <option value="896x1152">896 x 1152 (3:4)</option>
+                        <option value="768x1344">768 x 1344 (9:16)</option>
+                        <option value="640x1536">640 x 1536 (1:2)</option>
+                    </optgroup>
+
+                    <optgroup label="Квадратные (Square)">
+                        <option value="1024x1024" selected>1024 x 1024 (1:1)</option>
+                    </optgroup>
+
+                    <optgroup label="Горизонтальные (Landscape)">
+                        <option value="1216x832">1216 x 832 (3:2)</option>
+                        <option value="1152x896">1152 x 896 (4:3)</option>
+                        <option value="1344x768">1344 x 768 (16:9)</option>
+                        <option value="1536x640">1536 x 640 (2:1)</option>
+                    </optgroup>
                 </select>
+
             </div >
 
             <div class="input-group">
