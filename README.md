@@ -1,65 +1,83 @@
 # ggena
 
-**ggena** — это фреймворк-оркестратор для управления различными AI-генераторами (изображения, аудио, видео и т.д.) через единый интерфейс.
+**ggena** — a full-stack orchestrator for managing various AI generators (images, audio, video, etc.) through a unified web interface and API.
 
-## Основные возможности
+## 🚀 Architecture
 
-* **Динамическое обнаружение**: Новые модели можно добавлять простым созданием нового модуля, который автоматически регистрируется в системе.
-* **Единый API**: Работа с разными типами генерации (текст-в-изображение, текст-в-аудио и т.д.) через стандартизированные запросы и ответы.
-* **Поддержка CLI и Server**: Возможность запускать генерацию как через командную строку, так и через FastAPI сервер с поддержкой WebSocket для стриминга прогресса.
-* **Оптимизация под GPU**: Встроенная поддержка оптимизаций (например, TF32 для RTX 40-й серии) и эффективное управление VRAM.
+Ggena combines a powerful Python backend with a responsive web-based frontend to provide both programmatic access and an interactive user experience.
 
-## Быстрый старт
+### High-Level Overview
+* **Backend**: A FastAPI-powered server that orchestrates AI models, manages execution via a command pattern, and provides real-time updates through WebSockets.
+* **Frontend**: A lightweight, modern web UI that communicates with the backend for seamless generation and progress monitoring.
 
-### Запуск через Docker (рекомендуется)
+### Tech Stack
+| Layer | Technologies |
+| :--- | :--- |
+| **Backend** | Python 3.10+, FastAPI, Uvicorn, PyTorch, Diffusers, Pydantic |
+| **Frontend** | HTML5, CSS3, Modern JavaScript (ES6+) |
+| **Communication** | REST API (HTTP POST) & WebSockets (for real-time streaming) |
 
-Проект настроен для работы в Docker-контейнере с поддержкой NVIDIA GPU.
+## ✨ Key Features
 
-1. **Сборка и запуск контейнера:**
+* **Dynamic Discovery**: New models can be added by creating a new module, which is automatically registered in the system.
+* **Unified Interface**: Standardized requests and responses across all generation types.
+* **Real-time Streaming**: WebSocket support for live progress updates and incremental image delivery during generation.
+* **GPU Optimized**: Built-in support for hardware acceleration (e.g., TF32 for RTX 40-series) and efficient VRAM management.
+
+## 🛠️ Getting Started
+
+### Running with Docker (Recommended)
+
+The project is pre-configured to work in a Docker container with NVIDIA GPU support.
+
+1. **Build and start the containers:**
    ```bash
    make dcu
    ```
 
-2. **Запуск API сервера:**
+2. **Access the Web UI:**
+   Open your browser and navigate to `http://localhost:8000`.
+
+3. **Start the API server (and automatically manage containers):**
    ```bash
    make server
    ```
 
-3. **Генерация изображения через CLI (внутри контейнера):**
+4. **Generate an image via CLI (inside the container):**
    ```bash
    make gen_image PROMPT="a beautiful landscape" IMAGE_GEN_COUNT=1
    ```
 
-4. **Остановка контейнеров:**
+5. **Stop containers:**
    ```bash
    make stop
    ```
 
-### Разработка
+### Local Development (Non-Docker)
 
-Для локальной разработки без Docker проект использует стандартную систему упаковки Python (`pyproject.toml`).
+For local development without Docker, the project uses standard Python packaging (`pyproject.toml`).
 
-1. **Установка в режиме редактирования:**
+1. **Install in editable mode:**
    ```bash
    pip install -e .
    ```
 
-2. **Запуск CLI:**
+2. **Start the API & Web Server:**
+   ```bash
+   python src/app/server.py
+   ```
+   The server will be available at `http://localhost:8000`.
+
+3. **Run via CLI:**
    ```bash
    ggena-cli image "your prompt"
    ```
 
-## Архитектура
+## 📂 Project Structure
 
-Фреймворк построен на паттернах **Registry** (для регистрации генераторов) и **Strategy** (для реализации различных методов генерации). 
-
-* `src/core`: Ядро системы (регистрация, конфигурация, базовые типы).
-* `src/generators`: Реализации конкретных стратегий генерации.
-* `src/app`: Оркестратор (CLI и FastAPI сервер).
-
-## Технологический стек
-
-* **Python 3.10+**
-* **PyTorch** & **Diffusers** (для работы с моделями)
-* **FastAPI** (для API сервера)
-* **uv** (для быстрого управления зависимостями)
+* `src/core`: Core system logic (registry, configuration, base types).
+* `src/generators`: Implementation of specific generation strategies (image, audio, video, etc.).
+* `src/app`: Orchestrator layer.
+    * `server.py`: FastAPI server entry point.
+    * `cli.py`: Command-line interface implementation.
+    * `frontend/`: Web UI assets (`index.html`, `style.css`, `script.js`).
