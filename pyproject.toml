@@ -23,6 +23,7 @@ dependencies = [
     "typing-extensions",
     "structlog",
     "prometheus-client",
+    "websocket-client",
 ]
 
 [project.scripts]

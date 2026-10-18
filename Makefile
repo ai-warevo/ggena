@@ -7,7 +7,7 @@ IMAGE_GEN_COUNT ?= $(IMAGE_GEN_COUNT)
 TRACK ?= local
 COMPOSE_FILE := docker-compose.$(TRACK).yml
 
-.PHONY: help up exec gen_image stop logs server dev prod dev-up prod-up lint test setup clean dcu comfy comfy-stop comfy-logs
+.PHONY: help up exec gen_image stop logs server dev prod dev-up prod-up lint test setup clean dcu comfy comfy-stop comfy-logs gen_standalone
 
 help:
 	@echo "Usage:"
@@ -84,3 +84,7 @@ clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 
 dcu: up
+
+.PHONY: gen_standalone
+gen_standalone:
+	docker compose -f $(COMPOSE_FILE) exec ai-app python3 standalone_gen.py

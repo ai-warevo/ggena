@@ -21,9 +21,8 @@ services:
       - .:/workspace
       - ./hf_cache:/root/.cache/huggingface
       - ./civitai_cache:/workspace/civitai_cache
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - COMFY_SERVER_ADDRESS=comfyui:8188
+    env_file:
+      - .env
     stdin_open: true
     tty: true
     working_dir: /workspace
@@ -47,5 +46,6 @@ services:
       - ./civitai_cache:/root/ComfyUI/models/checkpoints
       - ./outputs:/root/ComfyUI/output
       - ./comfyui_custom_nodes:/root/ComfyUI/custom_nodes
+      - ./hf_cache/hub:/root/ComfyUI/models/diffusers
     stdin_open: true
     tty: true

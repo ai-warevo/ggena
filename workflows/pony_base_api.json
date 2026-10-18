@@ -1,0 +1,59 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 0,
+      "steps": 25,
+      "cfg": 6.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1.0,
+      "model": ["4", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
+    },
+    "class_type": "KSampler"
+  },
+  "4": {
+    "inputs": {
+      "model_path": "models--stablediffusionapi--Pony-Diffusion-V6-XL/snapshots/e4aa34ab663e915113703e0e3ea365a14f0d0e46"
+    },
+    "class_type": "DiffusersLoader"
+  },
+  "5": {
+    "inputs": {
+      "width": 832,
+      "height": 1216,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage"
+  },
+  "6": {
+    "inputs": {
+      "text": "POSITIVE_PROMPT_PLACEHOLDER",
+      "clip": ["4", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "7": {
+    "inputs": {
+      "text": "NEGATIVE_PROMPT_PLACEHOLDER",
+      "clip": ["4", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "8": {
+    "inputs": {
+      "samples": ["3", 0],
+      "vae": ["4", 2]
+    },
+    "class_type": "VAEDecode"
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "ggena_out",
+      "images": ["8", 0]
+    },
+    "class_type": "SaveImage"
+  }
+}
