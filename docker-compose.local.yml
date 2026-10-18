@@ -23,6 +23,29 @@ services:
       - ./civitai_cache:/workspace/civitai_cache
     environment:
       - HF_TOKEN=${HF_TOKEN}
+      - COMFY_SERVER_ADDRESS=comfyui:8188
     stdin_open: true
     tty: true
     working_dir: /workspace
+    depends_on:
+      - comfyui
+
+  comfyui:
+    image: yanwk/comfyui-boot:cu126-slim
+    container_name: ggena_comfyui
+    ports:
+      - "8188:8188"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./hf_cache:/root/.cache/huggingface
+      - ./civitai_cache:/root/ComfyUI/models/checkpoints
+      - ./outputs:/root/ComfyUI/output
+      - ./comfyui_custom_nodes:/root/ComfyUI/custom_nodes
+    stdin_open: true
+    tty: true

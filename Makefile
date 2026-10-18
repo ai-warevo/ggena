@@ -7,18 +7,19 @@ IMAGE_GEN_COUNT ?= $(IMAGE_GEN_COUNT)
 TRACK ?= local
 COMPOSE_FILE := docker-compose.$(TRACK).yml
 
-.PHONY: help up exec gen_image stop logs server dev prod dev-up prod-up lint test setup clean dcu
+.PHONY: help up exec gen_image stop logs server dev prod dev-up prod-up lint test setup clean dcu comfy comfy-stop comfy-logs
 
 help:
 	@echo "Usage:"
 	@echo "  make dev             - Start local development (dev track)"
 	@echo "  make prod            - Start production (prod track)"
+	@echo "  make comfy           - Start ONLY ComfyUI generator container"
 	@echo ""
 	@echo "Available commands:"
 	@echo "  up                   - Build and start containers"
 	@echo "  exec                 - Execute bash inside the container"
 	@echo "  gen_image            - Run image generation"
-	@echo "  server               - Start API server (and stop on exit)"
+	@echo "  server               - Up containers and attach to log stream"
 	@echo "  stop                 - Stop containers"
 	@echo "  logs                 - View logs"
 	@echo "  lint                 - Run Ruff linter"
@@ -58,6 +59,15 @@ stop:
 
 logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
+
+comfy:
+	docker compose -f $(COMPOSE_FILE) up comfyui -d
+
+comfy-stop:
+	docker compose -f $(COMPOSE_FILE) stop comfyui
+
+comfy-logs:
+	docker compose -f $(COMPOSE_FILE) logs -f comfyui
 
 # New Automation Commands
 lint:
