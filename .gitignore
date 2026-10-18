@@ -20,3 +20,4 @@ generated_image.png
 outputs/
 hf_cache/
 civitai_cache/
+comfyui_custom_nodes
